@@ -138,9 +138,6 @@ def main():
                     st.write(f"**Task Fidelity Score:** {report['fidelity_score']}/5")
                     st.write(f"**Evaluator Reasoning:** {report['fidelity_reasoning']}")
 
-            if st.session_state.generation_time:
-                st.caption(f"⏱️ Workflow completed in {st.session_state.generation_time:.1f} seconds")
-
             st.divider()
             st.subheader(st.session_state.quiz_data.get("quiz_title", "Assessment"))
             
