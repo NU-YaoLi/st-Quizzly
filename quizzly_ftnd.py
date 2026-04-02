@@ -18,13 +18,16 @@ if 'verification_report' not in st.session_state:
     st.session_state.verification_report = None
 
 def main():
-    st.title("🧠 Quizzly: Active Recall Generator")
+    st.title("🧠 Quizzly: Automated Quiz Generator")
     st.markdown("Transform passive reading into active mastery. Upload a document to generate a verified, targeted quiz based on Bloom's Taxonomy.")
 
-    # API Key Check
-    if not os.getenv('OPENAI_API_KEY'):
-        st.error("⚠️ Please set the OPENAI_API_KEY environment variable.")
+    # API Key Check via Streamlit Secrets
+    if "OPENAI_API_KEY" not in st.secrets:
+        st.error("⚠️ Please set the OPENAI_API_KEY in the Streamlit secrets.")
         return
+    
+    # Set it as an environment variable so LangChain and OpenAI clients pick it up automatically
+    os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 
     # --- Sidebar: Upload & Settings ---
     with st.sidebar:
@@ -44,7 +47,7 @@ def main():
             max_questions = max(1, page_count // 2)
             
             st.success(f"Document Loaded: {page_count} pages detected.")
-            st.info(f"To maintain context quality, max questions is set to Page Count / 2 ({max_questions}).")
+            st.info(f"To maintain context quality, max questions is set to {max_questions}.")
             
             st.header("2. Quiz Settings")
             num_questions = st.number_input(
@@ -111,7 +114,10 @@ def main():
             with st.form("quiz_form"):
                 user_answers = {}
                 for i, q in enumerate(st.session_state.quiz_data.get("questions", [])):
-                    st.markdown(f"**{i+1}. {q['question_text']}**")
+                    # Add the Difficulty badge to the question header
+                    difficulty = q.get('difficulty', 'Unrated')
+                    st.markdown(f"**{i+1}. {q['question_text']}** *(Difficulty: {difficulty})*")
+                    
                     user_answers[q['id']] = st.radio(
                         "Select an option:", 
                         q['options'], 
@@ -132,17 +138,23 @@ def main():
                             
                         user_letter = user_ans[0] # Extracts "A", "B", etc.
                         
+                        # Format the explanation so Markdown renders the newlines perfectly
+                        formatted_explanation = q['explanation'].replace('\n', '\n\n')
+                        
                         if user_letter == q['correct_option']:
                             st.success(f"**Q{q['id']}:** Correct! ✅")
+                            # Optionally show the explanation even when correct, for reinforcement!
+                            with st.expander("Show detailed explanation"):
+                                st.markdown(formatted_explanation)
                         else:
                             st.error(f"**Q{q['id']}:** Incorrect. The answer is {q['correct_option']}.")
-                            st.info(f"**Explanation:** {q['explanation']}")
+                            st.info(formatted_explanation)
                             
                             # Add to Error Notebook if not already there
                             error_entry = {
                                 "question": q['question_text'],
                                 "user_wrong": user_ans,
-                                "explanation": q['explanation']
+                                "explanation": formatted_explanation
                             }
                             if error_entry not in st.session_state.error_notebook:
                                 st.session_state.error_notebook.append(error_entry)

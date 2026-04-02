@@ -25,7 +25,7 @@ def code_based_grading(quiz_data, expected_count):
 
 def llm_based_grading(concepts, quiz_data):
     """Evaluates Task Fidelity to ensure questions match the extracted concepts."""
-    llm = ChatOpenAI(model="gpt-4o", temperature=0.0, model_kwargs={"response_format": {"type": "json_object"}}) 
+    llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.0, model_kwargs={"response_format": {"type": "json_object"}}) 
     
     eval_prompt = """You are an expert curriculum evaluator. 
     Review the following multiple-choice quiz and the core concepts it was supposed to cover.
