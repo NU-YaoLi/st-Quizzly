@@ -18,6 +18,8 @@ if 'error_notebook' not in st.session_state:
     st.session_state.error_notebook = []
 if 'verification_report' not in st.session_state:
     st.session_state.verification_report = None
+if 'generation_time' not in st.session_state:
+    st.session_state.generation_time = None
 
 def main():
     st.title("🧠 Quizzly: Automated Quiz Generator")
@@ -72,7 +74,6 @@ def main():
             # 1. Start the timer right as the button is clicked
             start_time = time.time() 
             
-            # 2. FIXED INDENTATION: This 'with' block must be indented inside the 'if' statement
             with st.status("Processing Document Workflow...", expanded=True) as status:
                 try:
                     client = setup_api()
@@ -102,6 +103,7 @@ def main():
                     
                     # 3. Calculate elapsed time and update the status label dynamically
                     elapsed_time = time.time() - start_time
+                    st.session_state.generation_time = elapsed_time
                     status.update(label=f"Workflow Complete in {elapsed_time:.1f} secs!", state="complete", expanded=False)
                     
                 except OpenAIError as e:
@@ -135,6 +137,9 @@ def main():
                     st.write(f"**Structural Checks Passed:** {report['passed_constraints']}")
                     st.write(f"**Task Fidelity Score:** {report['fidelity_score']}/5")
                     st.write(f"**Evaluator Reasoning:** {report['fidelity_reasoning']}")
+
+            if st.session_state.generation_time:
+                st.caption(f"⏱️ Workflow completed in {st.session_state.generation_time:.1f} seconds")
 
             st.divider()
             st.subheader(st.session_state.quiz_data.get("quiz_title", "Assessment"))
