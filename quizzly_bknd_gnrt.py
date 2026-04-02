@@ -63,26 +63,35 @@ Return a simple JSON list of strings: {"concepts": ["concept1", "concept2"]}"""
 
 def create_generation_chain(num_questions):
     """Generates the quiz using the dynamically injected question count."""
-    llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.3, model_kwargs={"response_format": {"type": "json_object"}})
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.5, model_kwargs={"response_format": {"type": "json_object"}})
     parser = JsonOutputParser()
     
-    # Note: Double curly braces {{ }} escape the JSON brackets. 
-    # The \\n\\n instructs the LLM to insert literal newlines in the JSON string.
+    # Calculate exact distribution favoring Easy -> Medium -> Hard
+    base = num_questions // 3
+    remainder = num_questions % 3
+    
+    easy_qty = base + (1 if remainder >= 1 else 0)
+    medium_qty = base + (1 if remainder == 2 else 0)
+    hard_qty = base
+    
+    # The prompt now receives exact integers instead of fractions
     system_instructions = f"""You are a Senior Instructional Designer and Subject Matter Expert. Your goal is to create active recall assessment materials that help students master concepts from their study documents.
 
 ### OBJECTIVE
 Analyze the provided user text/document and generate a multiple-choice quiz. The quiz must assess the user's understanding of the core concepts found strictly within the text.
 
 ### PEDAGOGICAL GUIDELINES
-1. **Difficulty Distribution:** Create a balanced quiz where roughly 1/3 of the questions are Easy (direct recall), 1/3 are Medium (application), and 1/3 are Hard (analysis/evaluation based on Bloom's Taxonomy).
-2. **Ordering:** You MUST present the questions strictly in ascending order of difficulty (Easy -> Medium -> Hard). Assign a "difficulty" label to each.
+1. **Difficulty Distribution:** You must generate exactly {num_questions} questions in total, distributed EXACTLY as follows:
+   - {easy_qty} Easy questions (direct recall of facts).
+   - {medium_qty} Medium questions (application of concepts).
+   - {hard_qty} Hard questions (analysis/evaluation based on Bloom's Taxonomy).
+2. **Ordering:** You MUST present the questions strictly in ascending order of difficulty (Easy -> Medium -> Hard). Assign the correct "difficulty" label to each.
 3. **Distractors:** The wrong options (distractors) must be plausible but clearly incorrect based on the text. Avoid obvious joke answers.
 4. **Explanation Formatting:** The "explanation" field is critical. To maximize readability, you MUST separate the explanation of the correct answer and the breakdowns of each wrong option using double newlines (\\n\\n).
 
 ### STRICT CONSTRAINTS
 1. **Source Truth:** Answer ONLY using the provided document. Do not use outside knowledge. If the information is not in the text, do not invent a question about it.
 2. **Output Format:** You must output valid JSON only. Do not output conversational text before or after the JSON.
-3. **Question Count:** Generate exactly {num_questions} questions.
 
 ### FEW-SHOT EXAMPLE
 {{

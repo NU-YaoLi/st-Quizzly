@@ -126,7 +126,7 @@ def main():
                     # Hidden expander for developers to see the exact line number of the crash
                     with st.expander("🛠️ Show Detailed Stack Trace (For Debugging)"):
                         st.code(traceback.format_exc(), language="python")
-                    
+
         if st.session_state.quiz_data:
             # Show verification results in an expander
             if st.session_state.verification_report:
@@ -200,7 +200,7 @@ def main():
                 st.info("No errors logged yet. Great job!")
             else:
                 for idx, error in enumerate(st.session_state.error_notebook):
-                    with st.expander(f"Review Item {idx + 1}"):
+                    with st.expander(f"Review Question {idx + 1}"):
                         st.markdown(f"**Q:** {error['question']}")
                         st.markdown(f"❌ *You answered: {error['user_wrong']}*")
                         # Using markdown here guarantees the \n\n breaks render nicely
