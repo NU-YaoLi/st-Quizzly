@@ -91,9 +91,28 @@ def main():
                 os.remove(temp_path)
                 status.update(label="Workflow Complete!", state="complete", expanded=False)
                 
+            except OpenAIError as e:
+                # Catches issues specifically related to OpenAI (Auth, Rate Limits, Timeouts)
+                status.update(label="OpenAI API Error", state="error")
+                st.error("There was a problem communicating with OpenAI. Check your API key, billing limits, or network connection.")
+                st.info(f"**Details:** {str(e)}")
+                
+            except ValueError as e:
+                # Catches missing environment variables or bad inputs
+                status.update(label="Configuration Error", state="error")
+                st.error("A configuration or input value error occurred.")
+                st.info(f"**Details:** {str(e)}")
+                
             except Exception as e:
-                status.update(label="Error occurred", state="error")
-                st.error(str(e))
+                # The fallback for any other unexpected Python or LangChain errors
+                error_type = type(e).__name__
+                status.update(label=f"System Error: {error_type}", state="error")
+                st.error(f"The workflow failed due to an unexpected {error_type}.")
+                st.info(f"**Details:** {str(e)}")
+                
+                # Hidden expander for developers to see the exact line number of the crash
+                with st.expander("🛠️ Show Detailed Stack Trace (For Debugging)"):
+                    st.code(traceback.format_exc(), language="python")
 
     # --- View 1: Quiz Execution ---
     # Added gap="large" for better spacing between the quiz and the notebook panel
