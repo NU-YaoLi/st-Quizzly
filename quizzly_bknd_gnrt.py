@@ -1,5 +1,7 @@
 import os
 import PyPDF2
+from pptx import Presentation
+import docx
 from openai import OpenAI
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -13,13 +15,30 @@ def setup_api():
     return OpenAI(api_key=api_key)
 
 def get_page_count(file_path):
-    """Calculates the number of pages in the uploaded PDF."""
+    """Calculates the number of pages/slides in the uploaded document."""
+    ext = os.path.splitext(file_path)[1].lower()
+    
     try:
-        with open(file_path, 'rb') as f:
-            reader = PyPDF2.PdfReader(f)
-            return len(reader.pages)
+        if ext == '.pdf':
+            with open(file_path, 'rb') as f:
+                reader = PyPDF2.PdfReader(f)
+                return len(reader.pages)
+                
+        elif ext == '.pptx':
+            prs = Presentation(file_path)
+            return len(prs.slides)
+            
+        elif ext == '.docx':
+            # Word docs don't have strict pages, so we estimate ~500 words per page
+            doc = docx.Document(file_path)
+            word_count = sum(len(p.text.split()) for p in doc.paragraphs)
+            return max(1, word_count // 500)
+            
+        else:
+            return 1 # Fallback
+            
     except Exception as e:
-        print(f"Warning: Could not read page count: {e}")
+        print(f"Warning: Could not read page count for {ext}: {e}")
         return 1
 
 def create_extraction_chain():

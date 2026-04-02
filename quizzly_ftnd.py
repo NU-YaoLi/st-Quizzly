@@ -32,7 +32,7 @@ def main():
     # --- Sidebar: Upload & Settings ---
     with st.sidebar:
         st.header("1. Document Upload")
-        uploaded_file = st.file_uploader("Upload PDF material", type=["pdf"])
+        uploaded_file = st.file_uploader("Upload study material (PDF, PPTX, DOCX)", type=["pdf", "pptx", "docx"])
         
         num_questions = 3 # Default
         

@@ -3,3 +3,5 @@ PyPDF2
 openai
 langchain-openai
 langchain-core
+python-pptx
+python-docx
