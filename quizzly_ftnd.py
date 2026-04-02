@@ -65,61 +65,67 @@ def main():
     
 
     # --- View 1: Quiz Execution ---
-    # Added gap="large" for better spacing between the quiz and the notebook panel
     col1, col2 = st.columns([2, 1], gap="large")
     
     with col1:
         if uploaded_file and generate_btn:
-        with st.status("Processing Document Workflow...", expanded=True) as status:
-            try:
-                client = setup_api()
-                
-                st.write("Uploading to secure environment...")
-                oai_file = client.files.create(file=open(temp_path, "rb"), purpose="user_data")
-                
-                st.write("Extracting core concepts...")
-                extractor = create_extraction_chain()
-                concepts = extractor.invoke({"file_id": oai_file.id})["concepts"]
-                
-                st.write(f"Generating {num_questions} questions via LangChain...")
-                generator = create_generation_chain(num_questions)
-                quiz_data = generator.invoke({
-                    "file_id": oai_file.id,
-                    "concepts_list": ", ".join(concepts)
-                })
-                
-                st.write("Running backend verification checks...")
-                report = verify_quiz(concepts, quiz_data, num_questions)
-                
-                st.session_state.verification_report = report
-                st.session_state.quiz_data = quiz_data
-                
-                # Cleanup
-                os.remove(temp_path)
-                status.update(label="Workflow Complete!", state="complete", expanded=False)
-                
-            except OpenAIError as e:
-                # Catches issues specifically related to OpenAI (Auth, Rate Limits, Timeouts)
-                status.update(label="OpenAI API Error", state="error")
-                st.error("There was a problem communicating with OpenAI. Check your API key, billing limits, or network connection.")
-                st.info(f"**Details:** {str(e)}")
-                
-            except ValueError as e:
-                # Catches missing environment variables or bad inputs
-                status.update(label="Configuration Error", state="error")
-                st.error("A configuration or input value error occurred.")
-                st.info(f"**Details:** {str(e)}")
-                
-            except Exception as e:
-                # The fallback for any other unexpected Python or LangChain errors
-                error_type = type(e).__name__
-                status.update(label=f"System Error: {error_type}", state="error")
-                st.error(f"The workflow failed due to an unexpected {error_type}.")
-                st.info(f"**Details:** {str(e)}")
-                
-                # Hidden expander for developers to see the exact line number of the crash
-                with st.expander("🛠️ Show Detailed Stack Trace (For Debugging)"):
-                    st.code(traceback.format_exc(), language="python")
+            # 1. Start the timer right as the button is clicked
+            start_time = time.time() 
+            
+            # 2. FIXED INDENTATION: This 'with' block must be indented inside the 'if' statement
+            with st.status("Processing Document Workflow...", expanded=True) as status:
+                try:
+                    client = setup_api()
+                    
+                    st.write("Uploading to secure environment...")
+                    oai_file = client.files.create(file=open(temp_path, "rb"), purpose="user_data")
+                    
+                    st.write("Extracting core concepts...")
+                    extractor = create_extraction_chain()
+                    concepts = extractor.invoke({"file_id": oai_file.id})["concepts"]
+                    
+                    st.write(f"Generating {num_questions} questions via LangChain...")
+                    generator = create_generation_chain(num_questions)
+                    quiz_data = generator.invoke({
+                        "file_id": oai_file.id,
+                        "concepts_list": ", ".join(concepts)
+                    })
+                    
+                    st.write("Running backend verification checks...")
+                    report = verify_quiz(concepts, quiz_data, num_questions)
+                    
+                    st.session_state.verification_report = report
+                    st.session_state.quiz_data = quiz_data
+                    
+                    # Cleanup
+                    os.remove(temp_path)
+                    
+                    # 3. Calculate elapsed time and update the status label dynamically
+                    elapsed_time = time.time() - start_time
+                    status.update(label=f"Workflow Complete in {elapsed_time:.1f} secs!", state="complete", expanded=False)
+                    
+                except OpenAIError as e:
+                    # Catches issues specifically related to OpenAI (Auth, Rate Limits, Timeouts)
+                    status.update(label="OpenAI API Error", state="error")
+                    st.error("There was a problem communicating with OpenAI. Check your API key, billing limits, or network connection.")
+                    st.info(f"**Details:** {str(e)}")
+                    
+                except ValueError as e:
+                    # Catches missing environment variables or bad inputs
+                    status.update(label="Configuration Error", state="error")
+                    st.error("A configuration or input value error occurred.")
+                    st.info(f"**Details:** {str(e)}")
+                    
+                except Exception as e:
+                    # The fallback for any other unexpected Python or LangChain errors
+                    error_type = type(e).__name__
+                    status.update(label=f"System Error: {error_type}", state="error")
+                    st.error(f"The workflow failed due to an unexpected {error_type}.")
+                    st.info(f"**Details:** {str(e)}")
+                    
+                    # Hidden expander for developers to see the exact line number of the crash
+                    with st.expander("🛠️ Show Detailed Stack Trace (For Debugging)"):
+                        st.code(traceback.format_exc(), language="python")
                     
         if st.session_state.quiz_data:
             # Show verification results in an expander
