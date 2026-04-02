@@ -2,6 +2,8 @@ import os
 import streamlit as st
 import tempfile
 import time
+import traceback
+from openai import OpenAIError
 
 # Import backend modules
 from quizzly_bknd_gnrt import setup_api, get_page_count, create_extraction_chain, create_generation_chain
@@ -31,10 +33,10 @@ def main():
 
     # --- Sidebar: Upload & Settings ---
     with st.sidebar:
-        st.header("1. Document Upload")
+        st.header("Document Upload")
         uploaded_file = st.file_uploader("Upload study material (PDF, PPTX, DOCX)", type=["pdf", "pptx", "docx"])
         
-        num_questions = 3 # Default
+        num_questions = 1 # Default
         
         if uploaded_file:
             # Save temp file to read pages and send to OpenAI
@@ -49,7 +51,7 @@ def main():
             st.success(f"Document Loaded: {page_count} pages detected.")
             st.info(f"To maintain context quality, max questions is set to {max_questions}.")
             
-            st.header("2. Quiz Settings")
+            st.header("Quiz Settings")
             num_questions = st.number_input(
                 "Number of Questions", 
                 min_value=1, 
@@ -94,12 +96,11 @@ def main():
                 st.error(str(e))
 
     # --- View 1: Quiz Execution ---
-    col1, col2 = st.columns([2, 1])
+    # Added gap="large" for better spacing between the quiz and the notebook panel
+    col1, col2 = st.columns([2, 1], gap="large")
     
     with col1:
         if st.session_state.quiz_data:
-            st.subheader(st.session_state.quiz_data.get("quiz_title", "Assessment"))
-            
             # Show verification results in an expander
             if st.session_state.verification_report:
                 report = st.session_state.verification_report
@@ -109,6 +110,7 @@ def main():
                     st.write(f"**Evaluator Reasoning:** {report['fidelity_reasoning']}")
 
             st.divider()
+            st.subheader(st.session_state.quiz_data.get("quiz_title", "Assessment"))
             
             # Interactive Quiz
             with st.form("quiz_form"):
@@ -159,22 +161,29 @@ def main():
                             if error_entry not in st.session_state.error_notebook:
                                 st.session_state.error_notebook.append(error_entry)
 
-    # --- View 2: Error Notebook Sidebar ---
+    # --- View 2: Error Notebook Right Panel ---
     with col2:
-        st.header("📓 Error Notebook")
-        st.markdown("Review your mistakes to reinforce learning.")
-        if not st.session_state.error_notebook:
-            st.info("No errors logged yet. Great job!")
-        else:
-            for idx, error in enumerate(st.session_state.error_notebook):
-                with st.expander(f"Review Item {idx + 1}"):
-                    st.write(f"**Q:** {error['question']}")
-                    st.write(f"❌ *You answered: {error['user_wrong']}*")
-                    st.write(f"💡 **Correction:** {error['explanation']}")
-                    
-            if st.button("Clear Notebook"):
-                st.session_state.error_notebook = []
-                st.rerun()
+        # Wrap the entire right section in a bordered container with a set height
+        with st.container(border=True, height=750):
+            st.header("📓 Error Notebook")
+            st.markdown("Review your mistakes to reinforce learning.")
+            st.divider()
+
+            if not st.session_state.error_notebook:
+                st.info("No errors logged yet. Great job!")
+            else:
+                for idx, error in enumerate(st.session_state.error_notebook):
+                    with st.expander(f"Review Item {idx + 1}"):
+                        st.markdown(f"**Q:** {error['question']}")
+                        st.markdown(f"❌ *You answered: {error['user_wrong']}*")
+                        # Using markdown here guarantees the \n\n breaks render nicely
+                        st.markdown(f"💡 **Correction:**\n\n{error['explanation']}")
+                
+                st.divider()
+                # Adding use_container_width=True makes the button span the panel nicely
+                if st.button("Clear Notebook", use_container_width=True):
+                    st.session_state.error_notebook = []
+                    st.rerun()
 
 if __name__ == "__main__":
     main()
