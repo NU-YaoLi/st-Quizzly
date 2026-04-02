@@ -62,7 +62,14 @@ def main():
             generate_btn = st.button("Generate & Verify Quiz", type="primary")
 
     # --- Main Area: Processing & Display ---
-    if uploaded_file and generate_btn:
+    
+
+    # --- View 1: Quiz Execution ---
+    # Added gap="large" for better spacing between the quiz and the notebook panel
+    col1, col2 = st.columns([2, 1], gap="large")
+    
+    with col1:
+        if uploaded_file and generate_btn:
         with st.status("Processing Document Workflow...", expanded=True) as status:
             try:
                 client = setup_api()
@@ -113,12 +120,7 @@ def main():
                 # Hidden expander for developers to see the exact line number of the crash
                 with st.expander("🛠️ Show Detailed Stack Trace (For Debugging)"):
                     st.code(traceback.format_exc(), language="python")
-
-    # --- View 1: Quiz Execution ---
-    # Added gap="large" for better spacing between the quiz and the notebook panel
-    col1, col2 = st.columns([2, 1], gap="large")
-    
-    with col1:
+                    
         if st.session_state.quiz_data:
             # Show verification results in an expander
             if st.session_state.verification_report:
