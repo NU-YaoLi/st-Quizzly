@@ -36,32 +36,40 @@ def main():
     # --- Sidebar: Upload & Settings ---
     with st.sidebar:
         st.header("Document Upload")
-        uploaded_file = st.file_uploader("Upload study material (PDF, PPTX, DOCX)", type=["pdf", "pptx", "docx"])
+        # The uploader itself is restricted, acting as the first line of defense
+        uploaded_file = st.file_uploader("Upload study material (PDF only)", type=["pdf"])
         
         num_questions = 1 # Default
+        generate_btn = False # Initialize button state
         
         if uploaded_file:
-            # Save temp file to read pages and send to OpenAI
-            temp_dir = tempfile.gettempdir()
-            temp_path = os.path.join(temp_dir, uploaded_file.name)
-            with open(temp_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
+            # Explicit validation to ensure it is a PDF
+            if not uploaded_file.name.lower().endswith('.pdf'):
+                st.error("⚠️ Invalid file type. Please upload a PDF document. DOCX and PPTX are not supported.")
+                # Show a disabled button so the user understands the workflow is blocked
+                st.button("Generate & Verify Quiz", type="primary", disabled=True)
+            else:
+                # Proceed with standard PDF processing
+                temp_dir = tempfile.gettempdir()
+                temp_path = os.path.join(temp_dir, uploaded_file.name)
+                with open(temp_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                    
+                page_count = get_page_count(temp_path)
+                max_questions = max(1, page_count // 2)
                 
-            page_count = get_page_count(temp_path)
-            max_questions = max(1, page_count // 2)
-            
-            st.success(f"Document Loaded: {page_count} pages detected.")
-            st.info(f"To maintain context quality, max questions is set to {max_questions}.")
-            
-            st.header("Quiz Settings")
-            num_questions = st.number_input(
-                "Number of Questions", 
-                min_value=1, 
-                max_value=max_questions, 
-                value=min(3, max_questions)
-            )
-            
-            generate_btn = st.button("Generate & Verify Quiz", type="primary")
+                st.success(f"Document Loaded: {page_count} pages detected.")
+                st.info(f"To maintain context quality, max questions is set to {max_questions}.")
+                
+                st.header("Quiz Settings")
+                num_questions = st.number_input(
+                    "Number of Questions", 
+                    min_value=1, 
+                    max_value=max_questions, 
+                    value=min(3, max_questions)
+                )
+                
+                generate_btn = st.button("Generate Quiz", type="primary")
 
     # --- Main Area: Processing & Display ---
     

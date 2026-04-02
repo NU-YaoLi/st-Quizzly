@@ -1,7 +1,5 @@
 import os
 import PyPDF2
-from pptx import Presentation
-import docx
 from openai import OpenAI
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -15,7 +13,7 @@ def setup_api():
     return OpenAI(api_key=api_key)
 
 def get_page_count(file_path):
-    """Calculates the number of pages/slides in the uploaded document."""
+    """Calculates the number of pages in the uploaded PDF document."""
     ext = os.path.splitext(file_path)[1].lower()
     
     try:
@@ -23,22 +21,11 @@ def get_page_count(file_path):
             with open(file_path, 'rb') as f:
                 reader = PyPDF2.PdfReader(f)
                 return len(reader.pages)
-                
-        elif ext == '.pptx':
-            prs = Presentation(file_path)
-            return len(prs.slides)
-            
-        elif ext == '.docx':
-            # Word docs don't have strict pages, so we estimate ~500 words per page
-            doc = docx.Document(file_path)
-            word_count = sum(len(p.text.split()) for p in doc.paragraphs)
-            return max(1, word_count // 500)
-            
         else:
             return 1 # Fallback
             
     except Exception as e:
-        print(f"Warning: Could not read page count for {ext}: {e}")
+        print(f"Warning: Could not read PDF page count: {e}")
         return 1
 
 def create_extraction_chain():
@@ -85,9 +72,12 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
    - {easy_qty} Easy questions (direct recall of facts).
    - {medium_qty} Medium questions (application of concepts).
    - {hard_qty} Hard questions (analysis/evaluation based on Bloom's Taxonomy).
-2. **Ordering:** You MUST present the questions strictly in ascending order of difficulty (Easy -> Medium -> Hard). Assign the correct "difficulty" label to each.
-3. **Distractors:** The wrong options (distractors) must be plausible but clearly incorrect based on the text. Avoid obvious joke answers.
-4. **Explanation Formatting:** The "explanation" field is critical. To maximize readability, you MUST separate the explanation of the correct answer and the breakdowns of each wrong option using double newlines (\\n\\n).
+2. **Question Styles (Conceptual vs. Scenario):** Within each difficulty tier, strive for a 50/50 split between standard conceptual questions and scenario-based questions. 
+   - **Conceptual Questions:** Ask directly about definitions, theories, or facts stated in the text.
+   - **Scenario-Based Questions:** Present a brief, hypothetical story, case study, or practical situation where the user must actively apply the document's concepts to deduce the correct answer.
+3. **Ordering:** You MUST present the questions strictly in ascending order of difficulty (Easy -> Medium -> Hard). Assign the correct "difficulty" label to each.
+4. **Distractors:** The wrong options (distractors) must be plausible but clearly incorrect based on the text. Avoid obvious joke answers.
+5. **Explanation Formatting:** The "explanation" field is critical. To maximize readability, you MUST separate the explanation of the correct answer and the breakdowns of each wrong option using double newlines (\n\n).
 
 ### STRICT CONSTRAINTS
 1. **Source Truth:** Answer ONLY using the provided document. Do not use outside knowledge. If the information is not in the text, do not invent a question about it.
@@ -108,7 +98,7 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
         "D) It eliminates the need for textbooks."
       ],
       "correct_option": "B",
-      "explanation": "The text states that self-testing (active recall) strengthens neural pathways (Roediger & Karpicke, 2006).\\n\\nOption A is incorrect because active recall explicitly requires more mental effort.\\n\\nOption C is incorrect because the text focuses on retention, not reading speed.\\n\\nOption D is incorrect as textbooks are still needed as source material."
+      "explanation": "The text states that self-testing (active recall) strengthens neural pathways (Roediger & Karpicke, 2006).\n\nOption A is incorrect because active recall explicitly requires more mental effort.\n\nOption C is incorrect because the text focuses on retention, not reading speed.\n\nOption D is incorrect as textbooks are still needed as source material."
     }}
   ]
 }}
