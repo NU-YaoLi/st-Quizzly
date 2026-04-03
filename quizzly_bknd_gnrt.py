@@ -80,7 +80,7 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
 5. **Explanation Formatting:** The "explanation" field is critical. To maximize readability, you MUST separate the explanation of the correct answer and the breakdowns of each wrong option using double newlines (\n\n).
 
 ### STRICT CONSTRAINTS
-1. **Source Truth:** Answer ONLY using the provided document. Do not use outside knowledge. If the information is not in the text, do not invent a question about it.
+1. **Source Truth:** The logic to answer the question MUST come strictly from the provided document. You are encouraged to invent fictional characters or hypothetical scenarios for the questions, but the core academic concepts and correct answers must be 100% grounded in the text. 
 2. **Output Format:** You must output valid JSON only. Do not output conversational text before or after the JSON.
 
 ### FEW-SHOT EXAMPLE
@@ -98,7 +98,20 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
         "D) It eliminates the need for textbooks."
       ],
       "correct_option": "B",
-      "explanation": "The text states that self-testing (active recall) strengthens neural pathways (Roediger & Karpicke, 2006).\n\nOption A is incorrect because active recall explicitly requires more mental effort.\n\nOption C is incorrect because the text focuses on retention, not reading speed.\n\nOption D is incorrect as textbooks are still needed as source material."
+      "explanation": "The text states that self-testing (active recall) strengthens neural pathways.\n\nOption A is incorrect because active recall explicitly requires more mental effort.\n\nOption C is incorrect because the text focuses on retention, not reading speed.\n\nOption D is incorrect as textbooks are still needed."
+    }},
+    {{
+      "id": 2,
+      "difficulty": "Medium",
+      "question_text": "Marcus is studying for a history exam. He spends three hours reading his textbook cover-to-cover and highlighting text, but does not take any practice tests. Based on the document, what is the most likely outcome of his study strategy?",
+      "options": [
+        "A) He will have deep, long-term retention of the dates and events.",
+        "B) He may suffer from the 'illusion of competence' and perform poorly on the actual exam.",
+        "C) He is utilizing the most effective pedagogical framework available.",
+        "D) He will avoid context window degradation."
+      ],
+      "correct_option": "B",
+      "explanation": "The document explains that passive reading without feedback loops leads to the 'illusion of competence' where a student feels prepared but fails the exam.\n\nOption A is incorrect because passive reading is cited as the least effective method for long-term retention.\n\nOption C is incorrect because active recall, not passive reading, is the effective framework.\n\nOption D is incorrect as context windows relate to AI, not human studying."
     }}
   ]
 }}
