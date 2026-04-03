@@ -142,9 +142,14 @@ def main():
             if st.session_state.verification_report:
                 report = st.session_state.verification_report
                 with st.expander("🛠️ View Verification Report"):
-                    st.write(f"**Structural Checks Passed:** {report['passed_constraints']}")
-                    st.write(f"**Task Fidelity Score:** {report['fidelity_score']}/5")
-                    st.write(f"**Evaluator Reasoning:** {report['fidelity_reasoning']}")
+                    # Use .get() to prevent KeyErrors if the LLM evaluator misbehaves or formatting changes
+                    passed = report.get('passed_constraints', 'Unknown')
+                    score = report.get('fidelity_score', 'N/A')
+                    reasoning = report.get('fidelity_reasoning', 'No reasoning provided by evaluator.')
+                    
+                    st.write(f"**Structural Checks Passed:** {passed}")
+                    st.write(f"**Task Fidelity Score:** {score}/5")
+                    st.write(f"**Evaluator Reasoning:** {reasoning}")
 
             st.divider()
             st.subheader(st.session_state.quiz_data.get("quiz_title", "Assessment"))
