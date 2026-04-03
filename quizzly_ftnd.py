@@ -9,7 +9,7 @@ from openai import OpenAIError
 from quizzly_bknd_gnrt import setup_api, get_page_count, create_extraction_chain, create_generation_chain
 from quizzly_bknd_vrf import verify_quiz
 
-st.set_page_config(page_title="Quizzly", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Quizzly", page_icon="📖", layout="wide")
 
 # Initialize Session States for stateful UI
 if 'quiz_data' not in st.session_state:
@@ -22,7 +22,7 @@ if 'generation_time' not in st.session_state:
     st.session_state.generation_time = None
 
 def main():
-    st.title("🧠 Quizzly: Automated Quiz Generator")
+    st.title("📖 Quizzly: Automated Quiz Generator")
     st.markdown("Transform passive reading into active mastery. Upload a document to generate a verified, targeted quiz based on Bloom's Taxonomy.")
 
     # API Key Check via Streamlit Secrets
@@ -69,7 +69,7 @@ def main():
                     value=min(3, max_questions)
                 )
                 
-                generate_btn = st.button("Generate Quiz", type="primary")
+                generate_btn = st.button("Generate & Verify Quiz", type="primary")
 
     # --- Main Area: Processing & Display ---
     
@@ -100,7 +100,7 @@ def main():
                         "concepts_list": ", ".join(concepts)
                     })
                     
-                    st.write("Running backend verification checks...")
+                    st.write("Running question verification checks...")
                     report = verify_quiz(concepts, quiz_data, num_questions)
                     
                     st.session_state.verification_report = report
