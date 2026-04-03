@@ -141,15 +141,41 @@ def main():
             # Show verification results in an expander
             if st.session_state.verification_report:
                 report = st.session_state.verification_report
-                with st.expander("🛠️ View Verification Report"):
-                    # Use .get() to prevent KeyErrors if the LLM evaluator misbehaves or formatting changes
-                    passed = report.get('passed_constraints', 'Unknown')
-                    score = report.get('fidelity_score', 'N/A')
-                    reasoning = report.get('fidelity_reasoning', 'No reasoning provided by evaluator.')
+                with st.expander("🛠️ View Comprehensive Verification Report"):
                     
-                    st.write(f"**Structural Checks Passed:** {passed}")
-                    st.write(f"**Task Fidelity Score:** {score}/5")
-                    st.write(f"**Evaluator Reasoning:** {reasoning}")
+                    # 1. Unpack all 6 metrics
+                    passed = report.get('passed_constraints', 'Unknown')
+                    c_score = report.get('constraint_score', 0.0)
+                    c_feedback = report.get('constraint_feedback', [])
+                    f_score = report.get('fidelity_score', 'N/A')
+                    p_score = report.get('pedagogical_score', 'N/A')
+                    reasoning = report.get('evaluator_reasoning', 'No reasoning provided by evaluator.')
+                    
+                    # 2. Render Overall Status
+                    status_icon = "✅ PASSED" if passed else "❌ FAILED"
+                    st.subheader(f"Pipeline Status: {status_icon}")
+                    st.divider()
+                    
+                    # 3. Render Code-Based Metrics (Unit Tests)
+                    st.markdown("#### 1. Structural Constraints (Code-Based Grading)")
+                    st.write(f"**Constraint Score:** {c_score * 100}%")
+                    for feedback_item in c_feedback:
+                        # Use green checkmarks for passes, red X's for fails
+                        icon = "✅" if "Pass" in feedback_item else "❌"
+                        st.markdown(f"{icon} {feedback_item}")
+                        
+                    st.divider()
+                    
+                    # 4. Render LLM-Based Metrics (Integration Tests)
+                    st.markdown("#### 2. Quality Evaluation (LLM-Based Grading)")
+                    colA, colB = st.columns(2)
+                    with colA:
+                        st.metric(label="Task Fidelity Score", value=f"{f_score}/5")
+                    with colB:
+                        st.metric(label="Pedagogical Score", value=f"{p_score}/5")
+                    
+                    st.markdown("**Evaluator Reasoning:**")
+                    st.info(reasoning)
 
             st.divider()
             st.subheader(st.session_state.quiz_data.get("quiz_title", "Assessment"))
