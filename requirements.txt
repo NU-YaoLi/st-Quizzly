@@ -5,3 +5,7 @@ langchain-openai
 langchain-core
 requests
 beautifulsoup4
+python-docx 
+python-pptx 
+reportlab 
+pillow

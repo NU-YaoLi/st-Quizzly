@@ -7,6 +7,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.output_parsers import JsonOutputParser
 
+
 def setup_api():
     """Validates the API key and returns the native OpenAI client."""
     api_key = os.environ.get('OPENAI_API_KEY')

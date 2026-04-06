@@ -5,11 +5,65 @@ import time
 import traceback
 from openai import OpenAIError
 import mimetypes
-
+from docx import Document
+from pptx import Presentation
+from reportlab.pdfgen import canvas
+from PIL import Image
+import uuid
 
 # Cleaned imports: no file conversion dependencies needed
 from quizzly_bknd_gnrt import setup_api, get_page_count, create_extraction_chain, create_generation_chain, process_link
 from quizzly_bknd_vrf import verify_quiz
+
+
+def docx_to_pdf(input_path):
+    output_path = f"/tmp/{uuid.uuid4()}.pdf"
+    
+    doc = Document(input_path)
+    c = canvas.Canvas(output_path)
+
+    y = 800
+    for para in doc.paragraphs:
+        text = para.text
+        if y < 50:
+            c.showPage()
+            y = 800
+        c.drawString(50, y, text[:100])
+        y -= 15
+
+    c.save()
+    return output_path
+
+def pptx_to_pdf(input_path):
+    output_path = f"/tmp/{uuid.uuid4()}.pdf"
+    
+    prs = Presentation(input_path)
+    c = canvas.Canvas(output_path)
+
+    for slide in prs.slides:
+        y = 800
+        for shape in slide.shapes:
+            if hasattr(shape, "text"):
+                text = shape.text
+                if y < 50:
+                    c.showPage()
+                    y = 800
+                c.drawString(50, y, text[:100])
+                y -= 15
+        c.showPage()
+
+    c.save()
+    return output_path
+
+def image_to_pdf(input_path):
+    output_path = f"/tmp/{uuid.uuid4()}.pdf"
+    
+    image = Image.open(input_path).convert("RGB")
+    image.save(output_path, "PDF")
+    
+    return output_path
+
+
 
 st.set_page_config(page_title="Quizzly", page_icon="📖", layout="wide")
 
@@ -57,24 +111,35 @@ def main():
         if uploaded_files or website_link:
             total_pages = 0
             temp_dir = tempfile.gettempdir()
-            valid_paths = []
-            
+            processed_paths = [] 
+
             # Process uploaded files directly
             if uploaded_files:
                 for uf in uploaded_files:
                     temp_path = os.path.join(temp_dir, uf.name)
                     with open(temp_path, "wb") as f:
                         f.write(uf.getbuffer())
-                    
-                    # Store native path directly for OpenAI
-                    valid_paths.append(temp_path)
-                    total_pages += get_page_count(temp_path)
+
+                    ext = os.path.splitext(temp_path)[1].lower()
+
+                    # 2. Kept all of your original conversion logic intact
+                    if ext == ".docx":
+                        new_path = docx_to_pdf(temp_path)
+                    elif ext == ".pptx":
+                        new_path = pptx_to_pdf(temp_path)
+                    elif ext in [".png", ".jpg", ".jpeg"]:
+                        new_path = image_to_pdf(temp_path)
+                    else:
+                        new_path = temp_path  # already PDF or TXT
+
+                    processed_paths.append(new_path)
+                    total_pages += get_page_count(new_path)
                     
             # Process website link
             if website_link:
                 link_path = process_link(website_link, temp_dir)
                 if link_path:
-                    valid_paths.append(link_path)
+                    processed_paths.append(link_path) # 3. Changed valid_paths to processed_paths
                     total_pages += get_page_count(link_path)
                     
             # Fallback if page count couldn't be parsed
@@ -83,7 +148,8 @@ def main():
                 
             max_questions = max(1, total_pages // 2)
             
-            st.success(f"Materials Loaded: {len(valid_paths)} sources detected.")
+            # 4. Changed valid_paths to processed_paths
+            st.success(f"Materials Loaded: {len(processed_paths)} sources detected.")
             st.info(f"To maintain context quality, max questions is set to {max_questions}.")
             
             st.header("Quiz Settings")
@@ -95,7 +161,7 @@ def main():
             )
             
             # Store validated paths in session state for processing block
-            st.session_state.current_paths = valid_paths
+            st.session_state.current_paths = processed_paths
             generate_btn = st.button("Generate & Verify Quiz", type="primary")
 
     # --- Main Area: Processing & Display ---
