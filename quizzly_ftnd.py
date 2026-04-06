@@ -4,6 +4,8 @@ import tempfile
 import time
 import traceback
 from openai import OpenAIError
+import mimetypes
+
 
 # Cleaned imports: no file conversion dependencies needed
 from quizzly_bknd_gnrt import setup_api, get_page_count, create_extraction_chain, create_generation_chain, process_link
@@ -60,7 +62,7 @@ def main():
             # Process uploaded files directly
             if uploaded_files:
                 for uf in uploaded_files:
-                    temp_path = os.path.join(temp_dir, uf.name)
+                    temp_path = os.path.join(temp_dir, f"{uuid.uuid4()}_{uf.name}")
                     with open(temp_path, "wb") as f:
                         f.write(uf.getbuffer())
                     
@@ -120,17 +122,20 @@ def main():
                         ".txt": "text/plain",
                         ".png": "image/png"
                     }
-                    
+
                     for fp in st.session_state.current_paths:
-                        ext = os.path.splitext(fp)[1].lower()
-                        # Fallback to octet-stream if unknown, but primarily grabs the exact type
-                        mime_type = mime_types.get(ext, "application/octet-stream")
-                        
-                        # Explicitly pass the filename, file bytes, and mime_type in a tuple
-                        oai_file = client.files.create(
-                            file=(os.path.basename(fp), open(fp, "rb"), mime_type),
-                            purpose="user_data"
-                        )
+                        mime_type, _ = mimetypes.guess_type(fp)
+                        if mime_type is None:
+                            mime_type = "application/octet-stream"
+
+                        st.write(f"Uploading: {fp} | MIME: {mime_type}")  # debug line
+
+                        with open(fp, "rb") as f:
+                            oai_file = client.files.create(
+                                file=(os.path.basename(fp), f, mime_type),
+                                purpose="user_data"
+                            )
+
                         oai_file_ids.append(oai_file.id)
                     
                     st.write("Extracting core concepts...")
