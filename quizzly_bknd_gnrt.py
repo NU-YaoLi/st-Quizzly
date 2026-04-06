@@ -57,9 +57,15 @@ You are a Meta-Expert Analyst. Identify the most critical concepts from a docume
 Return a simple JSON list of strings: {"concepts": ["concept1", "concept2"]}"""
 
     def build_extraction_msg(inputs):
-        content = [{"type": "text", "text": "Extract the core concepts from these files."}]
-        for file_id in inputs["file_ids"]:
+        content = [{"type": "text", "text": "Extract the core concepts from the provided materials."}]
+        
+        # Add File IDs if they exist
+        for file_id in inputs.get("file_ids", []):
             content.append({"type": "file", "file": {"file_id": file_id}})
+            
+        # Add Website Text directly if it exists
+        if inputs.get("web_context"):
+            content.append({"type": "text", "text": f"Web Content: {inputs['web_context']}"})
             
         return [
             SystemMessage(content=system_instructions),
@@ -67,6 +73,7 @@ Return a simple JSON list of strings: {"concepts": ["concept1", "concept2"]}"""
         ]
 
     return build_extraction_msg | llm | JsonOutputParser()
+
 
 def create_generation_chain(num_questions):
     """Generates the quiz using the dynamically injected question count."""
@@ -142,16 +149,21 @@ Generate the JSON format quiz now based on the attached document.
 """
 
     def build_generation_msg(inputs):
-        file_ids = inputs["file_ids"]
-        concepts = inputs["concepts_list"]
+        file_ids = inputs.get("file_ids", [])
+        concepts = inputs.get("concepts_list", "")
+        web_text = inputs.get("web_context", "")
         
         content = [{"type": "text", "text": f"Focus the quiz strictly on these extracted core concepts: {concepts}"}]
+        
         for file_id in file_ids:
             content.append({"type": "file", "file": {"file_id": file_id}})
+            
+        if web_text:
+            content.append({"type": "text", "text": f"Additional Web Source Material: {web_text}"})
             
         return [
             SystemMessage(content=system_instructions),
             HumanMessage(content=content)
         ]
-
+        
     return build_generation_msg | llm | parser

@@ -10,6 +10,8 @@ from pptx import Presentation
 from reportlab.pdfgen import canvas
 from PIL import Image
 import uuid
+import requests
+from bs4 import BeautifulSoup
 
 # Cleaned imports: no file conversion dependencies needed
 from quizzly_bknd_gnrt import setup_api, get_page_count, create_extraction_chain, create_generation_chain, process_link
@@ -17,7 +19,7 @@ from quizzly_bknd_vrf import verify_quiz
 
 
 def docx_to_pdf(input_path):
-    output_path = f"/tmp/{uuid.uuid4()}.pdf"
+    output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.pdf")
     
     doc = Document(input_path)
     c = canvas.Canvas(output_path)
@@ -35,7 +37,7 @@ def docx_to_pdf(input_path):
     return output_path
 
 def pptx_to_pdf(input_path):
-    output_path = f"/tmp/{uuid.uuid4()}.pdf"
+    output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.pdf")
     
     prs = Presentation(input_path)
     c = canvas.Canvas(output_path)
@@ -56,7 +58,7 @@ def pptx_to_pdf(input_path):
     return output_path
 
 def image_to_pdf(input_path):
-    output_path = f"/tmp/{uuid.uuid4()}.pdf"
+    output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.pdf")
     
     image = Image.open(input_path).convert("RGB")
     image.save(output_path, "PDF")
@@ -136,11 +138,20 @@ def main():
                     total_pages += get_page_count(new_path)
                     
             # Process website link
+            web_text = ""
             if website_link:
-                link_path = process_link(website_link, temp_dir)
-                if link_path:
-                    processed_paths.append(link_path) # 3. Changed valid_paths to processed_paths
-                    total_pages += get_page_count(link_path)
+                try:
+                    headers = {'User-Agent': 'Mozilla/5.0'}
+                    resp = requests.get(website_link, headers=headers, timeout=10)
+                    soup = BeautifulSoup(resp.text, 'html.parser')
+                    web_text = soup.get_text(separator='\n', strip=True)
+                    st.session_state.web_text = web_text # Store in state
+                    total_pages += 1 # Estimation for link
+                except Exception as e:
+                    st.error(f"Failed to read website: {e}")
+                    
+            st.session_state.current_paths = processed_paths
+            st.success(f"Materials Loaded: {len(processed_paths)} files and web link detected.")
                     
             # Fallback if page count couldn't be parsed
             if total_pages == 0:
@@ -206,13 +217,19 @@ def main():
                     
                     st.write("Extracting core concepts...")
                     extractor = create_extraction_chain()
-                    concepts = extractor.invoke({"file_ids": oai_file_ids})["concepts"]
+                    # Pass both file_ids and the direct web_text
+                    concepts_resp = extractor.invoke({
+                        "file_ids": oai_file_ids, 
+                        "web_context": st.session_state.get("web_text", "")
+                    })
+                    concepts = concepts_resp.get("concepts") or []
                     
-                    st.write(f"Generating {num_questions} questions via LangChain...")
+                    st.write(f"Generating {num_questions} questions...")
                     generator = create_generation_chain(num_questions)
                     quiz_data = generator.invoke({
                         "file_ids": oai_file_ids,
-                        "concepts_list": ", ".join(concepts)
+                        "concepts_list": ", ".join(concepts),
+                        "web_context": st.session_state.get("web_text", "")
                     })
                     
                     st.write("Running question verification checks...")
