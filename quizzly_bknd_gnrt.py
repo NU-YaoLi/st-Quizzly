@@ -1,5 +1,8 @@
 import os
 import PyPDF2
+import subprocess
+import requests
+from bs4 import BeautifulSoup
 from openai import OpenAI
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -28,6 +31,48 @@ def get_page_count(file_path):
         print(f"Warning: Could not read PDF page count: {e}")
         return 1
 
+def convert_to_pdf(file_path):
+    """Converts .docx and .pptx to .pdf before sending to OpenAI."""
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext not in ['.docx', '.pptx']:
+        return file_path
+        
+    new_path = os.path.splitext(file_path)[0] + ".pdf"
+    
+    try:
+        if ext == '.docx':
+            try:
+                from docx2pdf import convert
+                convert(file_path, new_path)
+            except ImportError:
+                # Fallback to libreoffice headless if docx2pdf isn't installed
+                subprocess.run(['libreoffice', '--headless', '--convert-to', 'pdf', file_path, '--outdir', os.path.dirname(file_path)], check=True)
+        elif ext == '.pptx':
+            # Requires LibreOffice installed on the server/system
+            subprocess.run(['libreoffice', '--headless', '--convert-to', 'pdf', file_path, '--outdir', os.path.dirname(file_path)], check=True)
+            
+        if os.path.exists(new_path):
+            return new_path
+    except Exception as e:
+        print(f"Conversion failed for {file_path}: {e}")
+        
+    return file_path # Fallback to original if conversion fails
+
+def process_link(url, temp_dir):
+    """Extracts text from a website link and saves it as a txt file."""
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        text = soup.get_text(separator='\n', strip=True)
+        link_path = os.path.join(temp_dir, "website_content.txt")
+        with open(link_path, "w", encoding="utf-8") as f:
+            f.write(text)
+        return link_path
+    except Exception as e:
+        print(f"Failed to process website link: {e}")
+        return None
+
 def create_extraction_chain():
     """Extracts the core concepts from the document."""
     llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.3)
@@ -38,12 +83,13 @@ You are a Meta-Expert Analyst. Identify the most critical concepts from a docume
 Return a simple JSON list of strings: {"concepts": ["concept1", "concept2"]}"""
 
     def build_extraction_msg(inputs):
+        content = [{"type": "text", "text": "Extract the core concepts from these files."}]
+        for file_id in inputs["file_ids"]:
+            content.append({"type": "file", "file": {"file_id": file_id}})
+            
         return [
             SystemMessage(content=system_instructions),
-            HumanMessage(content=[
-                {"type": "text", "text": "Extract the core concepts from this file."},
-                {"type": "file", "file": {"file_id": inputs["file_id"]}}
-            ])
+            HumanMessage(content=content)
         ]
 
     return build_extraction_msg | llm | JsonOutputParser()
@@ -121,15 +167,16 @@ Generate the JSON format quiz now based on the attached document.
 """
 
     def build_generation_msg(inputs):
-        file_id = inputs["file_id"]
+        file_ids = inputs["file_ids"]
         concepts = inputs["concepts_list"]
         
+        content = [{"type": "text", "text": f"Focus the quiz strictly on these extracted core concepts: {concepts}"}]
+        for file_id in file_ids:
+            content.append({"type": "file", "file": {"file_id": file_id}})
+            
         return [
             SystemMessage(content=system_instructions),
-            HumanMessage(content=[
-                {"type": "text", "text": f"Focus the quiz strictly on these extracted core concepts: {concepts}"},
-                {"type": "file", "file": {"file_id": file_id}}
-            ])
+            HumanMessage(content=content)
         ]
 
     return build_generation_msg | llm | parser
