@@ -113,9 +113,24 @@ def main():
                     
                     st.write("Uploading to secure environment...")
                     oai_file_ids = []
+                    mime_types = {
+                        ".pdf": "application/pdf",
+                        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        ".txt": "text/plain",
+                        ".png": "image/png"
+                    }
+                    
                     for fp in st.session_state.current_paths:
-                        # Files are uploaded natively to OpenAI without local conversion
-                        oai_file = client.files.create(file=open(fp, "rb"), purpose="user_data")
+                        ext = os.path.splitext(fp)[1].lower()
+                        # Fallback to octet-stream if unknown, but primarily grabs the exact type
+                        mime_type = mime_types.get(ext, "application/octet-stream")
+                        
+                        # Explicitly pass the filename, file bytes, and mime_type in a tuple
+                        oai_file = client.files.create(
+                            file=(os.path.basename(fp), open(fp, "rb"), mime_type),
+                            purpose="user_data"
+                        )
                         oai_file_ids.append(oai_file.id)
                     
                     st.write("Extracting core concepts...")
