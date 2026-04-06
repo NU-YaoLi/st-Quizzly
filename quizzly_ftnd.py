@@ -6,7 +6,7 @@ import traceback
 from openai import OpenAIError
 
 # Import backend modules
-from quizzly_bknd_gnrt import setup_api, get_page_count, create_extraction_chain, create_generation_chain
+from quizzly_bknd_gnrt import setup_api, get_page_count, create_extraction_chain, create_generation_chain, convert_to_pdf, process_link
 from quizzly_bknd_vrf import verify_quiz
 
 st.set_page_config(page_title="Quizzly", page_icon="📖", layout="wide")
@@ -20,6 +20,8 @@ if 'verification_report' not in st.session_state:
     st.session_state.verification_report = None
 if 'generation_time' not in st.session_state:
     st.session_state.generation_time = None
+if 'current_paths' not in st.session_state:
+    st.session_state.current_paths = []
 
 def main():
     st.title("📖 Quizzly: Automated Quiz Generator")
@@ -35,41 +37,65 @@ def main():
 
     # --- Sidebar: Upload & Settings ---
     with st.sidebar:
-        st.header("Document Upload")
-        # The uploader itself is restricted, acting as the first line of defense
-        uploaded_file = st.file_uploader("Upload study material (PDF only)", type=["pdf"])
+        st.header("Study Materials")
+        
+        # Support for multiple files and various types
+        uploaded_files = st.file_uploader(
+            "Upload files (PDF, DOCX, PPTX, TXT, PNG)", 
+            type=["pdf", "docx", "pptx", "txt", "png"], 
+            accept_multiple_files=True
+        )
+        
+        # Support for a website link
+        website_link = st.text_input("Or enter a website link")
         
         num_questions = 1 # Default
         generate_btn = False # Initialize button state
         
-        if uploaded_file:
-            # Explicit validation to ensure it is a PDF
-            if not uploaded_file.name.lower().endswith('.pdf'):
-                st.error("⚠️ Invalid file type. Please upload a PDF document. DOCX and PPTX are not supported.")
-                # Show a disabled button so the user understands the workflow is blocked
-                st.button("Generate & Verify Quiz", type="primary", disabled=True)
-            else:
-                # Proceed with standard PDF processing
-                temp_dir = tempfile.gettempdir()
-                temp_path = os.path.join(temp_dir, uploaded_file.name)
-                with open(temp_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
+        if uploaded_files or website_link:
+            total_pages = 0
+            temp_dir = tempfile.gettempdir()
+            valid_paths = []
+            
+            # Process uploaded files
+            if uploaded_files:
+                for uf in uploaded_files:
+                    temp_path = os.path.join(temp_dir, uf.name)
+                    with open(temp_path, "wb") as f:
+                        f.write(uf.getbuffer())
                     
-                page_count = get_page_count(temp_path)
-                max_questions = max(1, page_count // 2)
+                    # Convert DOCX/PPTX to PDF
+                    temp_path = convert_to_pdf(temp_path)
+                    valid_paths.append(temp_path)
+                    total_pages += get_page_count(temp_path)
+                    
+            # Process website link
+            if website_link:
+                link_path = process_link(website_link, temp_dir)
+                if link_path:
+                    valid_paths.append(link_path)
+                    total_pages += get_page_count(link_path)
+                    
+            # Fallback if page count couldn't be parsed
+            if total_pages == 0:
+                total_pages = 1
                 
-                st.success(f"Document Loaded: {page_count} pages detected.")
-                st.info(f"To maintain context quality, max questions is set to {max_questions}.")
-                
-                st.header("Quiz Settings")
-                num_questions = st.number_input(
-                    "Number of Questions", 
-                    min_value=1, 
-                    max_value=max_questions, 
-                    value=min(3, max_questions)
-                )
-                
-                generate_btn = st.button("Generate & Verify Quiz", type="primary")
+            max_questions = max(1, total_pages // 2)
+            
+            st.success(f"Materials Loaded: {len(valid_paths)} sources detected.")
+            st.info(f"To maintain context quality, max questions is set to {max_questions}.")
+            
+            st.header("Quiz Settings")
+            num_questions = st.number_input(
+                "Number of Questions", 
+                min_value=1, 
+                max_value=max_questions, 
+                value=min(3, max_questions)
+            )
+            
+            # Store validated paths in session state for processing block
+            st.session_state.current_paths = valid_paths
+            generate_btn = st.button("Generate & Verify Quiz", type="primary")
 
     # --- Main Area: Processing & Display ---
     
@@ -78,7 +104,7 @@ def main():
     col1, col2 = st.columns([2, 1], gap="large")
     
     with col1:
-        if uploaded_file and generate_btn:
+        if (uploaded_files or website_link) and generate_btn:
             # 1. Start the timer right as the button is clicked
             start_time = time.time() 
             
@@ -87,16 +113,19 @@ def main():
                     client = setup_api()
                     
                     st.write("Uploading to secure environment...")
-                    oai_file = client.files.create(file=open(temp_path, "rb"), purpose="user_data")
+                    oai_file_ids = []
+                    for fp in st.session_state.current_paths:
+                        oai_file = client.files.create(file=open(fp, "rb"), purpose="user_data")
+                        oai_file_ids.append(oai_file.id)
                     
                     st.write("Extracting core concepts...")
                     extractor = create_extraction_chain()
-                    concepts = extractor.invoke({"file_id": oai_file.id})["concepts"]
+                    concepts = extractor.invoke({"file_ids": oai_file_ids})["concepts"]
                     
                     st.write(f"Generating {num_questions} questions via LangChain...")
                     generator = create_generation_chain(num_questions)
                     quiz_data = generator.invoke({
-                        "file_id": oai_file.id,
+                        "file_ids": oai_file_ids,
                         "concepts_list": ", ".join(concepts)
                     })
                     
@@ -107,7 +136,11 @@ def main():
                     st.session_state.quiz_data = quiz_data
                     
                     # Cleanup
-                    os.remove(temp_path)
+                    for fp in st.session_state.current_paths:
+                        try:
+                            os.remove(fp)
+                        except Exception:
+                            pass
                     
                     # 3. Calculate elapsed time and update the status label dynamically
                     elapsed_time = time.time() - start_time
