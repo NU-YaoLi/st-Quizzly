@@ -5,4 +5,3 @@ langchain-openai
 langchain-core
 requests
 beautifulsoup4
-libreoffice
