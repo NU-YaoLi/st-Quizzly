@@ -5,8 +5,8 @@ import time
 import traceback
 from openai import OpenAIError
 
-# Import backend modules
-from quizzly_bknd_gnrt import setup_api, get_page_count, create_extraction_chain, create_generation_chain, convert_to_pdf, process_link
+# Cleaned imports: no file conversion dependencies needed
+from quizzly_bknd_gnrt import setup_api, get_page_count, create_extraction_chain, create_generation_chain, process_link
 from quizzly_bknd_vrf import verify_quiz
 
 st.set_page_config(page_title="Quizzly", page_icon="📖", layout="wide")
@@ -25,7 +25,7 @@ if 'current_paths' not in st.session_state:
 
 def main():
     st.title("📖 Quizzly: Automated Quiz Generator")
-    st.markdown("Transform passive reading into active mastery. Upload a document to generate a verified, targeted quiz based on Bloom's Taxonomy.")
+    st.markdown("Transform passive reading into active mastery. Upload documents or links to generate a verified, targeted quiz based on Bloom's Taxonomy.")
 
     # API Key Check via Streamlit Secrets
     if "OPENAI_API_KEY" not in st.secrets:
@@ -39,7 +39,7 @@ def main():
     with st.sidebar:
         st.header("Study Materials")
         
-        # Support for multiple files and various types
+        # Support for multiple files and various types natively
         uploaded_files = st.file_uploader(
             "Upload files (PDF, DOCX, PPTX, TXT, PNG)", 
             type=["pdf", "docx", "pptx", "txt", "png"], 
@@ -57,15 +57,14 @@ def main():
             temp_dir = tempfile.gettempdir()
             valid_paths = []
             
-            # Process uploaded files
+            # Process uploaded files directly
             if uploaded_files:
                 for uf in uploaded_files:
                     temp_path = os.path.join(temp_dir, uf.name)
                     with open(temp_path, "wb") as f:
                         f.write(uf.getbuffer())
                     
-                    # Convert DOCX/PPTX to PDF
-                    temp_path = convert_to_pdf(temp_path)
+                    # Store native path directly for OpenAI
                     valid_paths.append(temp_path)
                     total_pages += get_page_count(temp_path)
                     
@@ -115,6 +114,7 @@ def main():
                     st.write("Uploading to secure environment...")
                     oai_file_ids = []
                     for fp in st.session_state.current_paths:
+                        # Files are uploaded natively to OpenAI without local conversion
                         oai_file = client.files.create(file=open(fp, "rb"), purpose="user_data")
                         oai_file_ids.append(oai_file.id)
                     

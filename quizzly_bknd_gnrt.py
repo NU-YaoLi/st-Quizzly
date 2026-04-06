@@ -1,6 +1,5 @@
 import os
 import PyPDF2
-import subprocess
 import requests
 from bs4 import BeautifulSoup
 from openai import OpenAI
@@ -25,38 +24,11 @@ def get_page_count(file_path):
                 reader = PyPDF2.PdfReader(f)
                 return len(reader.pages)
         else:
-            return 1 # Fallback
+            return 1 # Fallback for non-PDFs natively supported by OpenAI
             
     except Exception as e:
         print(f"Warning: Could not read PDF page count: {e}")
         return 1
-
-def convert_to_pdf(file_path):
-    """Converts .docx and .pptx to .pdf before sending to OpenAI."""
-    ext = os.path.splitext(file_path)[1].lower()
-    if ext not in ['.docx', '.pptx']:
-        return file_path
-        
-    new_path = os.path.splitext(file_path)[0] + ".pdf"
-    
-    try:
-        if ext == '.docx':
-            try:
-                from docx2pdf import convert
-                convert(file_path, new_path)
-            except ImportError:
-                # Fallback to libreoffice headless if docx2pdf isn't installed
-                subprocess.run(['libreoffice', '--headless', '--convert-to', 'pdf', file_path, '--outdir', os.path.dirname(file_path)], check=True)
-        elif ext == '.pptx':
-            # Requires LibreOffice installed on the server/system
-            subprocess.run(['libreoffice', '--headless', '--convert-to', 'pdf', file_path, '--outdir', os.path.dirname(file_path)], check=True)
-            
-        if os.path.exists(new_path):
-            return new_path
-    except Exception as e:
-        print(f"Conversion failed for {file_path}: {e}")
-        
-    return file_path # Fallback to original if conversion fails
 
 def process_link(url, temp_dir):
     """Extracts text from a website link and saves it as a txt file."""
@@ -75,7 +47,8 @@ def process_link(url, temp_dir):
 
 def create_extraction_chain():
     """Extracts the core concepts from the document."""
-    llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0.3)
+    # Updated to gpt-5.4-mini and removed temperature parameter
+    llm = ChatOpenAI(model="gpt-5.4-mini")
     
     system_instructions = """### ROLE
 You are a Meta-Expert Analyst. Identify the most critical concepts from a document suitable for high-level testing.
@@ -96,7 +69,8 @@ Return a simple JSON list of strings: {"concepts": ["concept1", "concept2"]}"""
 
 def create_generation_chain(num_questions):
     """Generates the quiz using the dynamically injected question count."""
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.5, model_kwargs={"response_format": {"type": "json_object"}})
+    # Updated to gpt-5.4-mini and removed temperature parameter
+    llm = ChatOpenAI(model="gpt-5.4-mini", model_kwargs={"response_format": {"type": "json_object"}})
     parser = JsonOutputParser()
     
     # Calculate exact distribution favoring Easy -> Medium -> Hard
