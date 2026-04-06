@@ -62,7 +62,7 @@ def main():
             # Process uploaded files directly
             if uploaded_files:
                 for uf in uploaded_files:
-                    temp_path = os.path.join(temp_dir, f"{uuid.uuid4()}_{uf.name}")
+                    temp_path = os.path.join(temp_dir, uf.name)
                     with open(temp_path, "wb") as f:
                         f.write(uf.getbuffer())
                     
