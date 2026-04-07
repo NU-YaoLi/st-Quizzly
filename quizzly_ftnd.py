@@ -206,9 +206,9 @@ def main():
                         total_pages += 1
 
                         # Optional but VERY useful debugging:
-                        with st.expander("Website fetch debug"):
-                            st.write(f"Extracted chars: {len(text)}")
-                            st.code(web_text[:1000])
+                        # with st.expander("Website fetch debug"):
+                        #     st.write(f"Extracted chars: {len(text)}")
+                        #     st.code(web_text[:1000])
 
                 except Exception as e:
                     website_ok = False
@@ -257,7 +257,10 @@ def main():
         if generate_btn:
             st.session_state.workflow_status_label = None
             st.session_state.workflow_status_lines = []
-            
+
+            def log_line(s: str):
+                st.session_state.workflow_status_lines.append(s)
+                st.write(s)
             # 1. Start the timer right as the button is clicked
             start_time = time.time() 
 
@@ -265,7 +268,7 @@ def main():
                 try:
                     client = setup_api()
                     
-                    st.write("Uploading to secure environment...")
+                    log_line("Uploading to secure environment...")
                     oai_file_ids = []
                     mime_types = {
                         ".pdf": "application/pdf",
@@ -290,7 +293,7 @@ def main():
 
                         oai_file_ids.append(oai_file.id)
                     
-                    st.write("Extracting core concepts...")
+                    log_line("Extracting core concepts...")
                     extractor = create_extraction_chain()
                     # Pass both file_ids and the direct web_text
                     concepts_resp = extractor.invoke({
@@ -301,7 +304,7 @@ def main():
                     if not concepts:
                         raise ValueError("Failed to extract concepts from the provided materials (website may be unreadable).")
 
-                    st.write(f"Generating {num_questions} questions...")
+                    log_line(f"Generating {num_questions} questions...")
                     generator = create_generation_chain(num_questions)
                     quiz_data = generator.invoke({
                         "file_ids": oai_file_ids,
@@ -309,7 +312,7 @@ def main():
                         "web_context": st.session_state.get("web_text", "")
                     })
                     
-                    st.write("Running question verification checks...")
+                    log_line(f"Uploading: {fp} | MIME: {mime_type}")
                     report = verify_quiz(concepts, quiz_data, num_questions)
                     
                     st.session_state.verification_report = report
@@ -325,7 +328,8 @@ def main():
                     # 3. Calculate elapsed time and update the status label dynamically
                     elapsed_time = time.time() - start_time
                     st.session_state.generation_time = elapsed_time
-                    status.update(label=f"Workflow Complete in {elapsed_time:.1f} secs!", state="complete", expanded=False)
+                    st.session_state.workflow_status_label = f"Workflow Complete in {elapsed_time:.1f} secs!"
+                    status.update(label=st.session_state.workflow_status_label, state="complete", expanded=False)
                     
                 except OpenAIError as e:
                     # Catches issues specifically related to OpenAI (Auth, Rate Limits, Timeouts)
