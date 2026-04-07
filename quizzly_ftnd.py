@@ -139,25 +139,46 @@ def main():
                     
             # Process website link
             web_text = ""
+            website_ok = True
+
             if website_link:
                 try:
-                    headers = {'User-Agent': 'Mozilla/5.0'}
-                    resp = requests.get(website_link, headers=headers, timeout=10)
-                    soup = BeautifulSoup(resp.text, 'html.parser')
-                    web_text = soup.get_text(separator='\n', strip=True)
-                    st.session_state.web_text = web_text # Store in state
-                    total_pages += 1 # Estimation for link
+                    headers = {
+                        "User-Agent": "Mozilla/5.0",
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    }
+                    resp = requests.get(website_link, headers=headers, timeout=15, allow_redirects=True)
+                    resp.raise_for_status()
+            
+                    soup = BeautifulSoup(resp.text, "html.parser")
+            
+                    for tag in soup(["script", "style", "noscript", "header", "footer", "nav", "aside"]):
+                        tag.decompose()
+            
+                    text = soup.get_text(separator="\n", strip=True)
+                    text = "\n".join([line.strip() for line in text.splitlines() if line.strip()])
+            
+                    # Heuristic: if too short, treat as failed fetch (common for JS-heavy sites)
+                    if len(text) < 400:
+                        website_ok = False
+                        st.error("Website content cannot be fetched (page returned too little readable text). Try a different URL or upload a file.")
+                    else:
+                        # Trim to avoid overwhelming the model with navigation junk
+                        web_text = text[:12000]
+                        st.session_state.web_text = web_text
+                        total_pages += 1
+            
                 except Exception as e:
-                    st.error(f"Failed to read website: {e}")
+                    website_ok = False
+                    st.error(f"Website content cannot be fetched: {e}")
                     
             st.session_state.current_paths = processed_paths
-            st.success(f"Materials Loaded: {len(processed_paths)} files and web link detected.")
                     
             # Fallback if page count couldn't be parsed
             if total_pages == 0:
                 total_pages = 1
                 
-            max_questions = max(1, total_pages // 2)
+            max_questions = max(3, total_pages // 2)
             
             # 4. Changed valid_paths to processed_paths
             st.success(f"Materials Loaded: {len(processed_paths)} sources detected.")
@@ -165,15 +186,18 @@ def main():
             
             st.header("Quiz Settings")
             num_questions = st.number_input(
-                "Number of Questions", 
-                min_value=1, 
-                max_value=max_questions, 
-                value=min(3, max_questions)
+                "Number of Questions",
+                min_value=3,
+                max_value=max_questions,
+                value=3
             )
             
             # Store validated paths in session state for processing block
             st.session_state.current_paths = processed_paths
-            generate_btn = st.button("Generate & Verify Quiz", type="primary")
+            can_generate = bool(processed_paths) or (bool(website_link) and website_ok)
+            if not can_generate:
+                st.info("Fix the website link (or upload a file) to generate a quiz.")
+            generate_btn = st.button("Generate & Verify Quiz", type="primary", disabled=(not can_generate))
 
     # --- Main Area: Processing & Display ---
     
@@ -182,7 +206,7 @@ def main():
     col1, col2 = st.columns([2, 1], gap="large")
     
     with col1:
-        if (uploaded_files or website_link) and generate_btn:
+        if generate_btn:
             # 1. Start the timer right as the button is clicked
             start_time = time.time() 
             
@@ -223,7 +247,9 @@ def main():
                         "web_context": st.session_state.get("web_text", "")
                     })
                     concepts = concepts_resp.get("concepts") or []
-                    
+                    if not concepts:
+                        raise ValueError("Failed to extract concepts from the provided materials (website may be unreadable).")
+                        
                     st.write(f"Generating {num_questions} questions...")
                     generator = create_generation_chain(num_questions)
                     quiz_data = generator.invoke({

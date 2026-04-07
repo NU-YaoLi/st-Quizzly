@@ -145,7 +145,7 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
 }}
 
 ### FINAL INSTRUCTION
-Generate the JSON format quiz now based on the attached document.
+Generate the JSON format quiz now based strictly on the provided file(s) and/or the provided web content.
 """
 
     def build_generation_msg(inputs):
