@@ -66,7 +66,6 @@ def image_to_pdf(input_path):
     return output_path
 
 
-
 st.set_page_config(page_title="Quizzly", page_icon="📖", layout="wide")
 
 # Initialize Session States for stateful UI
@@ -80,6 +79,10 @@ if 'generation_time' not in st.session_state:
     st.session_state.generation_time = None
 if 'current_paths' not in st.session_state:
     st.session_state.current_paths = []
+if "workflow_status_label" not in st.session_state:
+    st.session_state.workflow_status_label = None
+if "workflow_status_lines" not in st.session_state:
+    st.session_state.workflow_status_lines = []
 
 def main():
     st.title("📖 Quizzly: Automated Quiz Generator")
@@ -141,33 +144,72 @@ def main():
             web_text = ""
             website_ok = True
 
+            def extract_readable_text(html: str) -> str:
+                soup = BeautifulSoup(html, "html.parser")
+
+                for tag in soup(["script", "style", "noscript", "header", "footer", "nav", "aside"]):
+                    tag.decompose()
+
+                # Prefer content-like tags (reduces nav / boilerplate)
+                parts = []
+                for el in soup.find_all(["h1", "h2", "h3", "p", "li"]):
+                    t = el.get_text(" ", strip=True)
+                    if t:
+                        parts.append(t)
+
+                text = "\n".join(parts).strip()
+
+                # Fallback if paragraphs not found
+                if len(text) < 200:
+                    text = soup.get_text(separator="\n", strip=True)
+                    text = "\n".join([line.strip() for line in text.splitlines() if line.strip()])
+
+                return text
+
+
             if website_link:
                 try:
                     headers = {
                         "User-Agent": "Mozilla/5.0",
                         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                     }
-                    resp = requests.get(website_link, headers=headers, timeout=15, allow_redirects=True)
+
+                    resp = requests.get(website_link, headers=headers, timeout=20, allow_redirects=True)
                     resp.raise_for_status()
-            
-                    soup = BeautifulSoup(resp.text, "html.parser")
-            
-                    for tag in soup(["script", "style", "noscript", "header", "footer", "nav", "aside"]):
-                        tag.decompose()
-            
-                    text = soup.get_text(separator="\n", strip=True)
-                    text = "\n".join([line.strip() for line in text.splitlines() if line.strip()])
-            
-                    # Heuristic: if too short, treat as failed fetch (common for JS-heavy sites)
-                    if len(text) < 400:
+
+                    text = extract_readable_text(resp.text)
+
+                    # If too short, try jina.ai fallback (often bypasses bot/JS issues)
+                    if len(text) < 250:
+                        # preserve scheme for jina
+                        if website_link.startswith("https://"):
+                            fallback_url = "https://r.jina.ai/https://" + website_link[len("https://"):]
+                        elif website_link.startswith("http://"):
+                            fallback_url = "https://r.jina.ai/http://" + website_link[len("http://"):]
+                        else:
+                            fallback_url = "https://r.jina.ai/http://" + website_link
+
+                        fb = requests.get(fallback_url, headers=headers, timeout=20, allow_redirects=True)
+                        fb.raise_for_status()
+                        # jina returns already-readable text often; still run through extractor safely
+                        text = extract_readable_text(fb.text)
+
+                    if len(text) < 250:
                         website_ok = False
-                        st.error("Website content cannot be fetched (page returned too little readable text). Try a different URL or upload a file.")
+                        st.error(
+                            "Website content cannot be fetched (too little readable text). "
+                            "This often happens on Google/JS-heavy pages. Try a direct article URL or upload a file."
+                        )
                     else:
-                        # Trim to avoid overwhelming the model with navigation junk
                         web_text = text[:12000]
                         st.session_state.web_text = web_text
                         total_pages += 1
-            
+
+                        # Optional but VERY useful debugging:
+                        with st.expander("Website fetch debug"):
+                            st.write(f"Extracted chars: {len(text)}")
+                            st.code(web_text[:1000])
+
                 except Exception as e:
                     website_ok = False
                     st.error(f"Website content cannot be fetched: {e}")
@@ -206,10 +248,19 @@ def main():
     col1, col2 = st.columns([2, 1], gap="large")
     
     with col1:
+        if st.session_state.workflow_status_label:
+            st.status(st.session_state.workflow_status_label, state="complete", expanded=False)
+            if st.session_state.workflow_status_lines:
+                with st.expander("View workflow details"):
+                    st.code("\n".join(st.session_state.workflow_status_lines))
+
         if generate_btn:
+            st.session_state.workflow_status_label = None
+            st.session_state.workflow_status_lines = []
+            
             # 1. Start the timer right as the button is clicked
             start_time = time.time() 
-            
+
             with st.status("Processing Document Workflow...", expanded=True) as status:
                 try:
                     client = setup_api()
@@ -249,7 +300,7 @@ def main():
                     concepts = concepts_resp.get("concepts") or []
                     if not concepts:
                         raise ValueError("Failed to extract concepts from the provided materials (website may be unreadable).")
-                        
+
                     st.write(f"Generating {num_questions} questions...")
                     generator = create_generation_chain(num_questions)
                     quiz_data = generator.invoke({
