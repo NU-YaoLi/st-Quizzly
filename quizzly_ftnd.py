@@ -41,16 +41,26 @@ if "workflow_status_lines" not in st.session_state:
 if "web_url_slot_count" not in st.session_state:
     st.session_state.web_url_slot_count = 1
 
+_PENDING_REMOVE_URL_INDEX = "_pending_remove_url_index"
 
-def collapse_web_url_slot(index: int) -> None:
-    """Drop URL slot at index and shift remaining values (widget keys stay 0..n-1)."""
-    n = int(st.session_state.web_url_slot_count)
-    if n <= 1 or index < 0 or index >= n:
+
+def _apply_pending_web_url_removal() -> None:
+    """Apply a URL row removal on a fresh run, before widgets mount (avoids Streamlit widget state errors)."""
+    pending = st.session_state.pop(_PENDING_REMOVE_URL_INDEX, None)
+    if pending is None:
         return
-    for j in range(index, n - 1):
-        st.session_state[f"web_url_{j}"] = st.session_state.get(f"web_url_{j + 1}", "")
-    st.session_state[f"web_url_{n - 1}"] = ""
-    st.session_state.web_url_slot_count = n - 1
+    n = min(int(st.session_state.web_url_slot_count), MAX_WEB_URL_SLOTS)
+    if n <= 1 or pending < 0 or pending >= n:
+        return
+    vals = [str(st.session_state.get(f"web_url_{i}", "") or "") for i in range(n)]
+    new_vals = vals[:pending] + vals[pending + 1 :]
+    for k in list(st.session_state.keys()):
+        if isinstance(k, str) and k.startswith("web_url_") and k[8:].isdigit():
+            del st.session_state[k]
+    st.session_state.web_url_slot_count = max(1, len(new_vals))
+    for i, v in enumerate(new_vals):
+        st.session_state[f"web_url_{i}"] = v
+    st.rerun()
 
 
 def main():
@@ -76,55 +86,88 @@ def main():
             help="Use either uploaded files (up to 5) or website URLs (up to 5), not both.",
         )
 
-        uploaded_files = None
+        files_mode = source_mode == "Upload files"
+
+        # Always mount the uploader (stable key) so switching source mode does not drop uploads.
+        uploaded_files = st.file_uploader(
+            "Upload files (PDF, DOCX, PPTX, TXT, PNG, JPG) — max 5",
+            type=["pdf", "docx", "pptx", "txt", "png", "jpg", "jpeg"],
+            accept_multiple_files=True,
+            key="quizzly_study_files",
+            disabled=not files_mode,
+        )
+        if files_mode and uploaded_files and len(uploaded_files) > 5:
+            st.error("Please upload at most 5 files. Remove extras and try again.")
+            uploaded_files = None
+        if not files_mode and uploaded_files:
+            st.caption(
+                "Uploaded files stay in the uploader above (greyed out). "
+                "Switch back to **Upload files** to use or remove them."
+            )
+
         website_urls: list[str] = []
 
-        if source_mode == "Upload files":
-            uploaded_files = st.file_uploader(
-                "Upload files (PDF, DOCX, PPTX, TXT, PNG, JPG) — max 5",
-                type=["pdf", "docx", "pptx", "txt", "png", "jpg", "jpeg"],
-                accept_multiple_files=True,
+        if not files_mode:
+            st.markdown(
+                """
+                <style>
+                /* Icon-sized secondary buttons in sidebar only (not primary Generate) */
+                section[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"],
+                section[data-testid="stSidebar"] button[kind="secondary"] {
+                    display: inline-flex !important;
+                    align-items: center !important;
+                    justify-content: center !important;
+                    padding: 0.35rem 0.45rem !important;
+                    min-width: 2.25rem !important;
+                    min-height: 2.25rem !important;
+                    font-size: 1.15rem !important;
+                    line-height: 1 !important;
+                }
+                section[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"] p,
+                section[data-testid="stSidebar"] button[kind="secondary"] p {
+                    line-height: 1 !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
             )
-            if uploaded_files and len(uploaded_files) > 5:
-                st.error("Please upload at most 5 files. Remove extras and try again.")
-                uploaded_files = None
-        else:
             st.caption(
                 "Use **⨁** to add a row and **✕** to remove it (at least one row stays). "
                 "Search-result pages often fail; prefer article URLs."
             )
+            _apply_pending_web_url_removal()
             n_slots = min(int(st.session_state.web_url_slot_count), MAX_WEB_URL_SLOTS)
             for i in range(n_slots):
-                col_url, col_x = st.columns([11, 1], gap="small")
+                col_url, col_x = st.columns([1, 0.14], gap="small")
                 with col_url:
                     st.text_input(f"Website URL {i + 1}", key=f"web_url_{i}")
                 with col_x:
-                    st.write("")
                     if st.button(
                         "✕",
                         key=f"remove_web_url_{i}",
+                        type="secondary",
                         disabled=(n_slots <= 1),
                         help="Remove this URL field",
                         use_container_width=True,
                     ):
-                        collapse_web_url_slot(i)
+                        st.session_state[_PENDING_REMOVE_URL_INDEX] = i
                         st.rerun()
             website_urls = []
             for i in range(n_slots):
                 v = (st.session_state.get(f"web_url_{i}") or "").strip()
                 if v:
                     website_urls.append(v)
-            add_col, _ = st.columns([1, 12])
-            with add_col:
-                if st.button(
-                    "⨁",
-                    key="add_web_url_slot",
-                    disabled=(n_slots >= MAX_WEB_URL_SLOTS),
-                    help="Add another URL field",
-                    use_container_width=True,
-                ):
-                    st.session_state.web_url_slot_count = min(n_slots + 1, MAX_WEB_URL_SLOTS)
-                    st.rerun()
+            if st.button(
+                "⨁",
+                key="add_web_url_slot",
+                type="secondary",
+                disabled=(n_slots >= MAX_WEB_URL_SLOTS),
+                help="Add another URL field",
+            ):
+                st.session_state.web_url_slot_count = min(n_slots + 1, MAX_WEB_URL_SLOTS)
+                st.rerun()
 
         num_questions = MIN_QUESTIONS
         generate_btn = False
@@ -293,7 +336,7 @@ def main():
                     elapsed_time = time.time() - start_time
                     st.session_state.generation_time = elapsed_time
                     st.session_state.workflow_status_label = (
-                        f"✓ Workflow complete in {elapsed_time:.1f} secs"
+                        f"Workflow complete in {elapsed_time:.1f} secs"
                     )
                 st.rerun()
 
