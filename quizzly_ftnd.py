@@ -1,135 +1,25 @@
+import mimetypes
 import os
-import streamlit as st
 import tempfile
 import time
 import traceback
-from openai import OpenAIError
-import mimetypes
-from docx import Document
-from pptx import Presentation
-from reportlab.pdfgen import canvas
-from PIL import Image
 import uuid
-import requests
-from bs4 import BeautifulSoup
 
-# Cleaned imports: no file conversion dependencies needed
+import streamlit as st
+from openai import OpenAIError
+
+from quizzly_bknd_fileprcs import (
+    docx_to_pdf,
+    fetch_website_text,
+    image_to_pdf,
+    pptx_to_pdf,
+    pseudo_pages_from_web_text,
+)
 from quizzly_bknd_gnrt import setup_api, get_page_count, create_extraction_chain, create_generation_chain
 from quizzly_bknd_vrf import verify_quiz
 
-# ~2500 characters of plain text ≈ one page for quiz sizing (web sources have no PDF page count)
-WEB_CHARS_PER_PAGE = 2500
-WEB_TEXT_PER_URL_CAP = 12000
-# Each successful URL counts at least this many pseudo-pages for max-question math so one article can reach min 3 questions (ceil(6/2)).
-WEB_PAGES_FLOOR_PER_URL = 6
 MIN_QUESTIONS = 3
-
-
-def extract_readable_text(html: str) -> str:
-    soup = BeautifulSoup(html, "html.parser")
-
-    for tag in soup(["script", "style", "noscript", "header", "footer", "nav", "aside"]):
-        tag.decompose()
-
-    parts = []
-    for el in soup.find_all(["h1", "h2", "h3", "p", "li"]):
-        t = el.get_text(" ", strip=True)
-        if t:
-            parts.append(t)
-
-    text = "\n".join(parts).strip()
-
-    if len(text) < 200:
-        text = soup.get_text(separator="\n", strip=True)
-        text = "\n".join([line.strip() for line in text.splitlines() if line.strip()])
-
-    return text
-
-
-def fetch_website_text(url: str) -> tuple[bool, str]:
-    """Fetch one URL and return (ok, extracted_text). Text is capped for downstream use."""
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    }
-
-    resp = requests.get(url, headers=headers, timeout=20, allow_redirects=True)
-    resp.raise_for_status()
-
-    text = extract_readable_text(resp.text)
-
-    if len(text) < 250:
-        if url.startswith("https://"):
-            fallback_url = "https://r.jina.ai/https://" + url[len("https://"):]
-        elif url.startswith("http://"):
-            fallback_url = "https://r.jina.ai/http://" + url[len("http://"):]
-        else:
-            fallback_url = "https://r.jina.ai/http://" + url
-
-        fb = requests.get(fallback_url, headers=headers, timeout=20, allow_redirects=True)
-        fb.raise_for_status()
-        text = extract_readable_text(fb.text)
-
-    if len(text) < 250:
-        return False, ""
-
-    return True, text[:WEB_TEXT_PER_URL_CAP]
-
-
-def pseudo_pages_from_web_text(text: str) -> int:
-    """Map extracted web text to a page count for max-question math (same formula as files: max_q ≈ pages//2)."""
-    if not text:
-        return 0
-    return max(1, len(text) // WEB_CHARS_PER_PAGE)
-
-
-def docx_to_pdf(input_path):
-    output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.pdf")
-    
-    doc = Document(input_path)
-    c = canvas.Canvas(output_path)
-
-    y = 800
-    for para in doc.paragraphs:
-        text = para.text
-        if y < 50:
-            c.showPage()
-            y = 800
-        c.drawString(50, y, text[:100])
-        y -= 15
-
-    c.save()
-    return output_path
-
-def pptx_to_pdf(input_path):
-    output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.pdf")
-    
-    prs = Presentation(input_path)
-    c = canvas.Canvas(output_path)
-
-    for slide in prs.slides:
-        y = 800
-        for shape in slide.shapes:
-            if hasattr(shape, "text"):
-                text = shape.text
-                if y < 50:
-                    c.showPage()
-                    y = 800
-                c.drawString(50, y, text[:100])
-                y -= 15
-        c.showPage()
-
-    c.save()
-    return output_path
-
-def image_to_pdf(input_path):
-    output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.pdf")
-    
-    image = Image.open(input_path).convert("RGB")
-    image.save(output_path, "PDF")
-    
-    return output_path
-
+MAX_WEB_URL_SLOTS = 5
 
 st.set_page_config(page_title="Quizzly", page_icon="📖", layout="wide")
 
@@ -148,6 +38,8 @@ if "workflow_status_label" not in st.session_state:
     st.session_state.workflow_status_label = None
 if "workflow_status_lines" not in st.session_state:
     st.session_state.workflow_status_lines = []
+if "web_url_slot_count" not in st.session_state:
+    st.session_state.web_url_slot_count = 1
 
 def main():
     st.title("📖 Quizzly: Automated Quiz Generator")
@@ -169,7 +61,7 @@ def main():
             "Material source (choose one)",
             ["Upload files", "Website links"],
             horizontal=True,
-            help="Use either uploaded files (up to 5) or website URLs (up to 3), not both.",
+            help="Use either uploaded files (up to 5) or website URLs (up to 5), not both.",
         )
 
         uploaded_files = None
@@ -177,21 +69,26 @@ def main():
 
         if source_mode == "Upload files":
             uploaded_files = st.file_uploader(
-                "Upload files (PDF, DOCX, PPTX, TXT, PNG) — max 5",
-                type=["pdf", "docx", "pptx", "txt", "png"],
+                "Upload files (PDF, DOCX, PPTX, TXT, PNG, JPG) — max 5",
+                type=["pdf", "docx", "pptx", "txt", "png", "jpg", "jpeg"],
                 accept_multiple_files=True,
             )
             if uploaded_files and len(uploaded_files) > 5:
                 st.error("Please upload at most 5 files. Remove extras and try again.")
                 uploaded_files = None
         else:
-            st.caption("Enter up to 3 URLs (one per field). Google search pages often fail; use article links.")
-            u1 = st.text_input("Website URL 1", key="web_url_1")
-            u2 = st.text_input("Website URL 2", key="web_url_2")
-            u3 = st.text_input("Website URL 3", key="web_url_3")
-            website_urls = [u.strip() for u in (u1, u2, u3) if u and u.strip()]
-            if len(website_urls) > 3:
-                website_urls = website_urls[:3]
+            st.caption("Add a URL field only when you need another link. Search-result pages often fail; prefer article URLs.")
+            n_slots = min(int(st.session_state.web_url_slot_count), MAX_WEB_URL_SLOTS)
+            for i in range(n_slots):
+                st.text_input(f"Website URL {i + 1}", key=f"web_url_{i}")
+            website_urls = []
+            for i in range(n_slots):
+                v = (st.session_state.get(f"web_url_{i}") or "").strip()
+                if v:
+                    website_urls.append(v)
+            if st.button("Add URL field", disabled=(n_slots >= MAX_WEB_URL_SLOTS)):
+                st.session_state.web_url_slot_count = min(n_slots + 1, MAX_WEB_URL_SLOTS)
+                st.rerun()
 
         num_questions = MIN_QUESTIONS
         generate_btn = False
@@ -206,13 +103,12 @@ def main():
             web_blocks: list[tuple[str, str]] = []
             web_fetch_errors: list[str] = []
             source_count = 0
-            files_eligible = False
-            web_eligible = False
 
             if source_mode == "Upload files":
                 st.session_state.web_text = ""
                 for uf in uploaded_files:
-                    temp_path = os.path.join(temp_dir, uf.name)
+                    safe_name = os.path.basename(uf.name) or "upload"
+                    temp_path = os.path.join(temp_dir, f"{uuid.uuid4().hex}_{safe_name}")
                     with open(temp_path, "wb") as f:
                         f.write(uf.getbuffer())
 
@@ -231,18 +127,7 @@ def main():
                     total_pages += get_page_count(new_path)
 
                 source_count = len(processed_paths)
-                raw_max = total_pages // 2
-                files_eligible = raw_max >= MIN_QUESTIONS
-                max_questions = raw_max if files_eligible else MIN_QUESTIONS
-                st.caption(
-                    f"Max questions = total pages ÷ 2 (minimum quiz size is {MIN_QUESTIONS}). "
-                    f"Your files: **{total_pages}** page(s) → cap **{raw_max}**."
-                )
-                if not files_eligible:
-                    st.warning(
-                        f"Need at least {MIN_QUESTIONS * 2} total pages to allow a {MIN_QUESTIONS}-question quiz "
-                        f"(current cap from pages ÷ 2 is {raw_max}). Add more files or pages."
-                    )
+                max_questions = max(MIN_QUESTIONS, total_pages // 2)
 
             else:
                 st.session_state.current_paths = []
@@ -264,7 +149,7 @@ def main():
 
                 source_count = len(web_blocks)
                 total_web_pages = sum(
-                    max(WEB_PAGES_FLOOR_PER_URL, pseudo_pages_from_web_text(t)) for _, t in web_blocks
+                    max(1, pseudo_pages_from_web_text(t)) for _, t in web_blocks
                 )
                 if not web_blocks:
                     total_web_pages = 0
@@ -274,20 +159,7 @@ def main():
                 )
                 st.session_state.web_text = combined_web
 
-                raw_max = total_web_pages // 2
-                web_eligible = raw_max >= MIN_QUESTIONS
-                max_questions = raw_max if web_eligible else MIN_QUESTIONS
-                st.caption(
-                    f"Max questions = estimated pages ÷ 2 (same idea as files). "
-                    f"Each link counts at least **{WEB_PAGES_FLOOR_PER_URL}** pseudo-pages, plus more for long text "
-                    f"(~{WEB_CHARS_PER_PAGE} characters ≈ 1 page). "
-                    f"Estimated **{total_web_pages}** page(s) from **{source_count}** link(s) → cap **{raw_max}**."
-                )
-                if web_blocks and not web_eligible:
-                    st.warning(
-                        f"Fetched text is too short for a {MIN_QUESTIONS}-question cap (effective pages ÷ 2 = {raw_max}). "
-                        "Try longer articles or more URLs."
-                    )
+                max_questions = max(MIN_QUESTIONS, total_web_pages // 2)
 
             st.session_state.current_paths = processed_paths
 
@@ -295,31 +167,20 @@ def main():
                 st.warning("Materials loaded: 0 sources — check your URLs or switch to file upload.")
             else:
                 st.success(f"Materials Loaded: {source_count} source(s) detected.")
-            if source_mode == "Upload files":
-                eligible = files_eligible
-            else:
-                eligible = bool(web_blocks) and web_eligible
-
-            if eligible:
-                st.info(f"To maintain context quality, max questions is set to {max_questions}.")
 
             st.header("Quiz Settings")
-            if eligible:
-                num_questions = st.number_input(
-                    "Number of Questions",
-                    min_value=MIN_QUESTIONS,
-                    max_value=max_questions,
-                    value=MIN_QUESTIONS,
-                )
-            else:
-                st.caption("Not enough material for the minimum quiz size; increase pages or web text to choose question count.")
-                num_questions = MIN_QUESTIONS
+            num_questions = st.number_input(
+                "Number of Questions",
+                min_value=MIN_QUESTIONS,
+                max_value=max_questions,
+                value=MIN_QUESTIONS,
+            )
 
             st.session_state.current_paths = processed_paths
             if source_mode == "Upload files":
-                can_generate = bool(processed_paths) and files_eligible
+                can_generate = bool(processed_paths)
             else:
-                can_generate = bool(web_blocks) and web_eligible
+                can_generate = bool(web_blocks)
 
             if not can_generate:
                 st.info("Add valid material (files or fetchable URLs) to generate a quiz.")
@@ -333,41 +194,35 @@ def main():
     
     with col1:
         if st.session_state.workflow_status_label:
-            st.status(st.session_state.workflow_status_label, state="complete", expanded=False)
-            if st.session_state.workflow_status_lines:
-                with st.expander("View workflow details"):
-                    st.code("\n".join(st.session_state.workflow_status_lines))
+            with st.expander(st.session_state.workflow_status_label, expanded=False):
+                lines = st.session_state.workflow_status_lines or []
+                if lines:
+                    st.code("\n".join(lines))
 
         if generate_btn:
             st.session_state.workflow_status_label = None
             st.session_state.workflow_status_lines = []
 
-            def log_line(s: str):
-                st.session_state.workflow_status_lines.append(s)
-                st.write(s)
-            # 1. Start the timer right as the button is clicked
-            start_time = time.time() 
+            start_time = time.time()
 
             with st.status("Processing Document Workflow...", expanded=True) as status:
+
+                def log_line(s: str):
+                    st.session_state.workflow_status_lines.append(s)
+                    status.write(s)
+
                 try:
                     client = setup_api()
-                    
+
                     log_line("Uploading to secure environment...")
                     oai_file_ids = []
-                    mime_types = {
-                        ".pdf": "application/pdf",
-                        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                        ".txt": "text/plain",
-                        ".png": "image/png"
-                    }
 
                     for fp in st.session_state.current_paths:
                         mime_type, _ = mimetypes.guess_type(fp)
                         if mime_type is None:
                             mime_type = "application/octet-stream"
 
-                        st.write(f"Uploading: {fp} | MIME: {mime_type}")  # debug line
+                        log_line(f"Uploading: {os.path.basename(fp)} | MIME: {mime_type}")
 
                         with open(fp, "rb") as f:
                             oai_file = client.files.create(
@@ -376,13 +231,12 @@ def main():
                             )
 
                         oai_file_ids.append(oai_file.id)
-                    
+
                     log_line("Extracting core concepts...")
                     extractor = create_extraction_chain()
-                    # Pass both file_ids and the direct web_text
                     concepts_resp = extractor.invoke({
-                        "file_ids": oai_file_ids, 
-                        "web_context": st.session_state.get("web_text", "")
+                        "file_ids": oai_file_ids,
+                        "web_context": st.session_state.get("web_text", ""),
                     })
                     concepts = concepts_resp.get("concepts") or []
                     if not concepts:
@@ -393,28 +247,28 @@ def main():
                     quiz_data = generator.invoke({
                         "file_ids": oai_file_ids,
                         "concepts_list": ", ".join(concepts),
-                        "web_context": st.session_state.get("web_text", "")
+                        "web_context": st.session_state.get("web_text", ""),
                     })
-                    
+
                     log_line("Running quiz verification checks...")
                     report = verify_quiz(concepts, quiz_data, num_questions)
-                    
+
                     st.session_state.verification_report = report
                     st.session_state.quiz_data = quiz_data
-                    
-                    # Cleanup
+
                     for fp in st.session_state.current_paths:
                         try:
                             os.remove(fp)
                         except Exception:
                             pass
-                    
-                    # 3. Calculate elapsed time and update the status label dynamically
+
                     elapsed_time = time.time() - start_time
                     st.session_state.generation_time = elapsed_time
-                    st.session_state.workflow_status_label = f"Workflow Complete in {elapsed_time:.1f} secs!"
-                    status.update(label=st.session_state.workflow_status_label, state="complete", expanded=False)
-                    
+                    st.session_state.workflow_status_label = (
+                        f"✓ Workflow complete in {elapsed_time:.1f} secs"
+                    )
+                    st.rerun()
+
                 except OpenAIError as e:
                     # Catches issues specifically related to OpenAI (Auth, Rate Limits, Timeouts)
                     status.update(label="OpenAI API Error", state="error")
