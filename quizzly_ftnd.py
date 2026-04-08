@@ -203,8 +203,6 @@ def main():
                 st.session_state.web_url_slot_count = min(n_slots + 1, MAX_WEB_URL_SLOTS)
                 st.rerun()
 
-        verbose_logs = st.checkbox("Verbose workflow logs", value=False)
-
         num_questions = MIN_QUESTIONS
         generate_btn = False
 
@@ -369,10 +367,6 @@ def main():
             def log_line(s: str):
                 st.session_state.workflow_status_lines.append(s)
 
-            def log_detail(s: str):
-                if verbose_logs:
-                    st.session_state.workflow_status_lines.append(s)
-
             client = None
             oai_file_ids: list[str] = []
             try:
@@ -384,8 +378,6 @@ def main():
                         mime_type, _ = mimetypes.guess_type(fp)
                         if mime_type is None:
                             mime_type = "application/octet-stream"
-
-                        log_detail(f"Uploading: {os.path.basename(fp)} | MIME: {mime_type}")
 
                         with open(fp, "rb") as f:
                             try:
