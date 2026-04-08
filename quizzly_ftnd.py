@@ -140,9 +140,17 @@ def main():
             _apply_pending_web_url_removal()
             n_slots = min(int(st.session_state.web_url_slot_count), MAX_WEB_URL_SLOTS)
             for i in range(n_slots):
-                col_url, col_x = st.columns([1, 0.14], gap="small")
+                st.caption(f"Website URL {i + 1}")
+                col_url, col_x = st.columns(
+                    [1, 0.14], gap="small", vertical_alignment="center"
+                )
                 with col_url:
-                    st.text_input(f"Website URL {i + 1}", key=f"web_url_{i}")
+                    st.text_input(
+                        "URL",
+                        key=f"web_url_{i}",
+                        label_visibility="collapsed",
+                        placeholder="https://…",
+                    )
                 with col_x:
                     if st.button(
                         "✕",
