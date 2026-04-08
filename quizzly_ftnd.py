@@ -578,7 +578,7 @@ def main():
             width="stretch",
             key="quizzly_error_notebook",
         ):
-            st.header("📓 Error Notebook")
+            st.header("Error Notebook")
             st.markdown("Review your mistakes to reinforce learning.")
             st.divider()
 
