@@ -277,11 +277,11 @@ def main():
     
 
     # --- View 1: Quiz Execution ---
-    # Error Notebook: full-height right rail (stretch + viewport min-height via CSS key)
+    # Error Notebook: full-height right rail only (no frame around quiz column)
     st.markdown(
         """
         <style>
-        /* Keyed stretch container for Error Notebook — full viewport height on the right */
+        /* Keyed Error Notebook container fills the right rail height */
         section[data-testid="stMainBlockContainer"] [class*="st-key-quizzly_error_notebook"] {
             min-height: calc(100vh - 9.5rem) !important;
             box-sizing: border-box;
@@ -290,7 +290,7 @@ def main():
         """,
         unsafe_allow_html=True,
     )
-    col1, col2 = st.columns([2, 1], gap="large", border=True, vertical_alignment="top")
+    col1, col2 = st.columns([2, 1], gap="large", vertical_alignment="top")
     
     with col1:
         if generate_btn:
@@ -478,7 +478,7 @@ def main():
     # --- View 2: Error Notebook Right Panel ---
     with col2:
         with st.container(
-            border=False,
+            border=True,
             height="stretch",
             width="stretch",
             key="quizzly_error_notebook",
