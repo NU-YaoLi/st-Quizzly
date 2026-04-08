@@ -41,8 +41,20 @@ if "workflow_status_lines" not in st.session_state:
 if "web_url_slot_count" not in st.session_state:
     st.session_state.web_url_slot_count = 1
 
+
+def collapse_web_url_slot(index: int) -> None:
+    """Drop URL slot at index and shift remaining values (widget keys stay 0..n-1)."""
+    n = int(st.session_state.web_url_slot_count)
+    if n <= 1 or index < 0 or index >= n:
+        return
+    for j in range(index, n - 1):
+        st.session_state[f"web_url_{j}"] = st.session_state.get(f"web_url_{j + 1}", "")
+    st.session_state[f"web_url_{n - 1}"] = ""
+    st.session_state.web_url_slot_count = n - 1
+
+
 def main():
-    st.title("📖 Quizzly: Automated Quiz Generator")
+    st.title("Quizzly: Automated Quiz Generator")
     st.markdown("Transform passive reading into active mastery. Upload documents or links to generate a verified, targeted quiz based on Bloom's Taxonomy.")
 
     # API Key Check via Streamlit Secrets
@@ -77,18 +89,42 @@ def main():
                 st.error("Please upload at most 5 files. Remove extras and try again.")
                 uploaded_files = None
         else:
-            st.caption("Add a URL field only when you need another link. Search-result pages often fail; prefer article URLs.")
+            st.caption(
+                "Use **⨁** to add a row and **✕** to remove it (at least one row stays). "
+                "Search-result pages often fail; prefer article URLs."
+            )
             n_slots = min(int(st.session_state.web_url_slot_count), MAX_WEB_URL_SLOTS)
             for i in range(n_slots):
-                st.text_input(f"Website URL {i + 1}", key=f"web_url_{i}")
+                col_url, col_x = st.columns([11, 1], gap="small")
+                with col_url:
+                    st.text_input(f"Website URL {i + 1}", key=f"web_url_{i}")
+                with col_x:
+                    st.write("")
+                    if st.button(
+                        "✕",
+                        key=f"remove_web_url_{i}",
+                        disabled=(n_slots <= 1),
+                        help="Remove this URL field",
+                        use_container_width=True,
+                    ):
+                        collapse_web_url_slot(i)
+                        st.rerun()
             website_urls = []
             for i in range(n_slots):
                 v = (st.session_state.get(f"web_url_{i}") or "").strip()
                 if v:
                     website_urls.append(v)
-            if st.button("Add URL field", disabled=(n_slots >= MAX_WEB_URL_SLOTS)):
-                st.session_state.web_url_slot_count = min(n_slots + 1, MAX_WEB_URL_SLOTS)
-                st.rerun()
+            add_col, _ = st.columns([1, 12])
+            with add_col:
+                if st.button(
+                    "⨁",
+                    key="add_web_url_slot",
+                    disabled=(n_slots >= MAX_WEB_URL_SLOTS),
+                    help="Add another URL field",
+                    use_container_width=True,
+                ):
+                    st.session_state.web_url_slot_count = min(n_slots + 1, MAX_WEB_URL_SLOTS)
+                    st.rerun()
 
         num_questions = MIN_QUESTIONS
         generate_btn = False
@@ -193,25 +229,17 @@ def main():
     col1, col2 = st.columns([2, 1], gap="large")
     
     with col1:
-        if st.session_state.workflow_status_label:
-            with st.expander(st.session_state.workflow_status_label, expanded=False):
-                lines = st.session_state.workflow_status_lines or []
-                if lines:
-                    st.code("\n".join(lines))
-
         if generate_btn:
             st.session_state.workflow_status_label = None
             st.session_state.workflow_status_lines = []
 
             start_time = time.time()
 
-            with st.status("Processing Document Workflow...", expanded=True) as status:
+            def log_line(s: str):
+                st.session_state.workflow_status_lines.append(s)
 
-                def log_line(s: str):
-                    st.session_state.workflow_status_lines.append(s)
-                    status.write(s)
-
-                try:
+            try:
+                with st.spinner("Processing document workflow…"):
                     client = setup_api()
 
                     log_line("Uploading to secure environment...")
@@ -267,36 +295,35 @@ def main():
                     st.session_state.workflow_status_label = (
                         f"✓ Workflow complete in {elapsed_time:.1f} secs"
                     )
-                    st.rerun()
+                st.rerun()
 
-                except OpenAIError as e:
-                    # Catches issues specifically related to OpenAI (Auth, Rate Limits, Timeouts)
-                    status.update(label="OpenAI API Error", state="error")
-                    st.error("There was a problem communicating with OpenAI. Check your API key, billing limits, or network connection.")
-                    st.info(f"**Details:** {str(e)}")
-                    
-                except ValueError as e:
-                    # Catches missing environment variables or bad inputs
-                    status.update(label="Configuration Error", state="error")
-                    st.error("A configuration or input value error occurred.")
-                    st.info(f"**Details:** {str(e)}")
-                    
-                except Exception as e:
-                    # The fallback for any other unexpected Python or LangChain errors
-                    error_type = type(e).__name__
-                    status.update(label=f"System Error: {error_type}", state="error")
-                    st.error(f"The workflow failed due to an unexpected {error_type}.")
-                    st.info(f"**Details:** {str(e)}")
-                    
-                    # Hidden expander for developers to see the exact line number of the crash
-                    with st.expander("🛠️ Show Detailed Stack Trace (For Debugging)"):
-                        st.code(traceback.format_exc(), language="python")
+            except OpenAIError as e:
+                st.error("There was a problem communicating with OpenAI. Check your API key, billing limits, or network connection.")
+                st.info(f"**Details:** {str(e)}")
+
+            except ValueError as e:
+                st.error("A configuration or input value error occurred.")
+                st.info(f"**Details:** {str(e)}")
+
+            except Exception as e:
+                error_type = type(e).__name__
+                st.error(f"The workflow failed due to an unexpected {error_type}.")
+                st.info(f"**Details:** {str(e)}")
+
+                with st.expander("🛠️ Show Detailed Stack Trace (For Debugging)"):
+                    st.code(traceback.format_exc(), language="python")
+
+        if st.session_state.workflow_status_label:
+            with st.expander(st.session_state.workflow_status_label, expanded=False):
+                lines = st.session_state.workflow_status_lines or []
+                if lines:
+                    st.code("\n".join(lines))
 
         if st.session_state.quiz_data:
             # Show verification results in an expander
             if st.session_state.verification_report:
                 report = st.session_state.verification_report
-                with st.expander("🛠️ View Comprehensive Verification Report"):
+                with st.expander("View Comprehensive Verification Report"):
                     
                     # 1. Unpack all 6 metrics
                     passed = report.get('passed_constraints', 'Unknown')
