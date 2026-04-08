@@ -1,7 +1,5 @@
 import os
 import PyPDF2
-import requests
-from bs4 import BeautifulSoup
 from openai import OpenAI
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -30,21 +28,6 @@ def get_page_count(file_path):
     except Exception as e:
         print(f"Warning: Could not read PDF page count: {e}")
         return 1
-
-def process_link(url, temp_dir):
-    """Extracts text from a website link and saves it as a txt file."""
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, timeout=10)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        text = soup.get_text(separator='\n', strip=True)
-        link_path = os.path.join(temp_dir, "website_content.txt")
-        with open(link_path, "w", encoding="utf-8") as f:
-            f.write(text)
-        return link_path
-    except Exception as e:
-        print(f"Failed to process website link: {e}")
-        return None
 
 def create_extraction_chain():
     """Extracts the core concepts from the document."""

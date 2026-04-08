@@ -1,8 +1,10 @@
 """File conversion and web text extraction for Quizzly (no Streamlit)."""
 
+import ipaddress
 import os
 import tempfile
 import uuid
+from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -13,6 +15,44 @@ from reportlab.pdfgen import canvas
 
 WEB_CHARS_PER_PAGE = 2500
 WEB_TEXT_PER_URL_CAP = 12000
+
+
+def _is_safe_http_url(url: str) -> bool:
+    """Basic SSRF guard: allow only http/https and block localhost/private IP literals."""
+    try:
+        p = urlparse(url)
+    except Exception:
+        return False
+
+    if p.scheme not in {"http", "https"}:
+        return False
+    if not p.netloc:
+        return False
+
+    hostname = (p.hostname or "").strip().lower()
+    if not hostname:
+        return False
+
+    if hostname in {"localhost"} or hostname.endswith(".localhost") or hostname.endswith(".local"):
+        return False
+
+    # If hostname is an IP literal, block private/internal ranges.
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            return False
+    except ValueError:
+        # Not an IP literal; allow (DNS-level blocking is out of scope here).
+        pass
+
+    return True
 
 
 def extract_readable_text(html: str) -> str:
@@ -38,6 +78,9 @@ def extract_readable_text(html: str) -> str:
 
 def fetch_website_text(url: str) -> tuple[bool, str]:
     """Fetch one URL and return (ok, extracted_text). Text is capped for downstream use."""
+    if not _is_safe_http_url(url):
+        return False, ""
+
     headers = {
         "User-Agent": "Mozilla/5.0",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -55,6 +98,9 @@ def fetch_website_text(url: str) -> tuple[bool, str]:
             fallback_url = "https://r.jina.ai/http://" + url[len("http://"):]
         else:
             fallback_url = "https://r.jina.ai/http://" + url
+
+        if not _is_safe_http_url(fallback_url):
+            return False, ""
 
         fb = requests.get(fallback_url, headers=headers, timeout=20, allow_redirects=True)
         fb.raise_for_status()

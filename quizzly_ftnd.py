@@ -20,6 +20,7 @@ from quizzly_bknd_vrf import verify_quiz
 
 MIN_QUESTIONS = 3
 MAX_WEB_URL_SLOTS = 5
+ANSWER_LETTERS = ["A", "B", "C", "D"]
 
 st.set_page_config(page_title="Quizzly", page_icon="📖", layout="wide")
 
@@ -34,6 +35,8 @@ if 'generation_time' not in st.session_state:
     st.session_state.generation_time = None
 if 'current_paths' not in st.session_state:
     st.session_state.current_paths = []
+if "cleanup_paths" not in st.session_state:
+    st.session_state.cleanup_paths = []
 if "workflow_status_label" not in st.session_state:
     st.session_state.workflow_status_label = None
 if "workflow_status_lines" not in st.session_state:
@@ -85,6 +88,9 @@ def main():
         )
 
         files_mode = source_mode == "Upload files"
+        if files_mode:
+            # Prevent stale website text from influencing file-only runs.
+            st.session_state.web_text = ""
 
         # Always mount the uploader (stable key) so switching source mode does not drop uploads.
         uploaded_files = st.file_uploader(
@@ -183,6 +189,7 @@ def main():
         if (source_mode == "Upload files" and has_files) or (source_mode == "Website links" and has_urls):
             temp_dir = tempfile.gettempdir()
             processed_paths: list[str] = []
+            cleanup_paths: list[str] = []
             total_pages = 0
             web_blocks: list[tuple[str, str]] = []
             web_fetch_errors: list[str] = []
@@ -195,15 +202,19 @@ def main():
                     temp_path = os.path.join(temp_dir, f"{uuid.uuid4().hex}_{safe_name}")
                     with open(temp_path, "wb") as f:
                         f.write(uf.getbuffer())
+                    cleanup_paths.append(temp_path)
 
                     ext = os.path.splitext(temp_path)[1].lower()
 
                     if ext == ".docx":
                         new_path = docx_to_pdf(temp_path)
+                        cleanup_paths.append(new_path)
                     elif ext == ".pptx":
                         new_path = pptx_to_pdf(temp_path)
+                        cleanup_paths.append(new_path)
                     elif ext in [".png", ".jpg", ".jpeg"]:
                         new_path = image_to_pdf(temp_path)
+                        cleanup_paths.append(new_path)
                     else:
                         new_path = temp_path
 
@@ -246,6 +257,7 @@ def main():
                 max_questions = max(MIN_QUESTIONS, total_web_pages // 2)
 
             st.session_state.current_paths = processed_paths
+            st.session_state.cleanup_paths = cleanup_paths
 
             if source_count == 0:
                 st.warning("Materials loaded: 0 sources — check your URLs or switch to file upload.")
@@ -302,6 +314,28 @@ def main():
             def log_line(s: str):
                 st.session_state.workflow_status_lines.append(s)
 
+            def _validate_quiz_shape(quiz: object, expected_count: int) -> dict:
+                if not isinstance(quiz, dict):
+                    raise ValueError("Generated quiz is not a JSON object.")
+                questions = quiz.get("questions")
+                if not isinstance(questions, list):
+                    raise ValueError("Generated quiz JSON is missing 'questions' list.")
+                if len(questions) != expected_count:
+                    raise ValueError(f"Expected {expected_count} questions, got {len(questions)}.")
+                required = {"id", "difficulty", "question_text", "options", "correct_option", "explanation"}
+                for q in questions:
+                    if not isinstance(q, dict):
+                        raise ValueError("A question item is not an object.")
+                    missing = required - set(q.keys())
+                    if missing:
+                        raise ValueError(f"Question {q.get('id', '?')} missing keys: {sorted(missing)}")
+                    opts = q.get("options")
+                    if not isinstance(opts, list) or len(opts) != 4:
+                        raise ValueError(f"Question {q.get('id', '?')} must have exactly 4 options.")
+                    if q.get("correct_option") not in ANSWER_LETTERS:
+                        raise ValueError(f"Question {q.get('id', '?')} has invalid correct_option.")
+                return quiz
+
             try:
                 with st.spinner("Processing document workflow…"):
                     client = setup_api()
@@ -341,18 +375,13 @@ def main():
                         "concepts_list": ", ".join(concepts),
                         "web_context": st.session_state.get("web_text", ""),
                     })
+                    quiz_data = _validate_quiz_shape(quiz_data, num_questions)
 
                     log_line("Running quiz verification checks...")
                     report = verify_quiz(concepts, quiz_data, num_questions)
 
                     st.session_state.verification_report = report
                     st.session_state.quiz_data = quiz_data
-
-                    for fp in st.session_state.current_paths:
-                        try:
-                            os.remove(fp)
-                        except Exception:
-                            pass
 
                     elapsed_time = time.time() - start_time
                     st.session_state.generation_time = elapsed_time
@@ -376,6 +405,24 @@ def main():
 
                 with st.expander("🛠️ Show Detailed Stack Trace (For Debugging)"):
                     st.code(traceback.format_exc(), language="python")
+            finally:
+                # Best-effort cleanup of uploaded temp files (local) and OpenAI file objects (remote).
+                cleanup_list = st.session_state.get("cleanup_paths") or []
+                for p in cleanup_list:
+                    try:
+                        if p and os.path.exists(p):
+                            os.remove(p)
+                    except Exception:
+                        pass
+                st.session_state.cleanup_paths = []
+                try:
+                    for fid in oai_file_ids:
+                        try:
+                            client.files.delete(fid)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
         if st.session_state.workflow_status_label:
             with st.expander(st.session_state.workflow_status_label, expanded=False):
@@ -451,8 +498,12 @@ def main():
                         if not user_ans:
                             st.warning(f"Question {q['id']} was left blank.")
                             continue
-                            
-                        user_letter = user_ans[0] # Extracts "A", "B", etc.
+                        try:
+                            user_idx = q["options"].index(user_ans)
+                            user_letter = ANSWER_LETTERS[user_idx]
+                        except Exception:
+                            st.warning(f"Question {q['id']} answer format was unexpected.")
+                            continue
                         
                         # Format the explanation so Markdown renders the newlines perfectly
                         formatted_explanation = q['explanation'].replace('\n', '\n\n')
