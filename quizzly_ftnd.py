@@ -87,34 +87,26 @@ def main():
         files_mode = source_mode == "Upload files"
 
         # Always mount the uploader (stable key) so switching source mode does not drop uploads.
-        # We hide it via CSS when in website mode, but keep it mounted.
-        st.markdown(
-            """
-            <style>
-            section[data-testid="stSidebar"] [class*="st-key-quizzly_file_uploader_wrap"] {
-                margin-bottom: 0.25rem;
-            }
-            /* When in website mode we hide the uploader UI, but keep it mounted. */
-            section[data-testid="stSidebar"] [class*="st-key-quizzly_file_uploader_wrap"] .quizzly-hide-uploader + div {
-                display: none !important;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-        wrap = st.container(key="quizzly_file_uploader_wrap")
-        # Toggle a CSS class on the keyed container by inserting a tiny marker element.
-        with wrap:
-            # Marker div used by CSS to hide the uploader when not in file mode.
-            if not files_mode:
-                st.markdown("<div class=\"quizzly-hide-uploader\"></div>", unsafe_allow_html=True)
-            uploaded_files = st.file_uploader(
-                "Upload files (PDF, DOCX, PPTX, TXT, PNG, JPG) — max 5",
-                type=["pdf", "docx", "pptx", "txt", "png", "jpg", "jpeg"],
-                accept_multiple_files=True,
-                key="quizzly_study_files",
-                disabled=not files_mode,
+        # Hide it visually in website mode (but keep it mounted so state persists).
+        if not files_mode:
+            st.markdown(
+                """
+                <style>
+                section[data-testid="stSidebar"] [class*="st-key-quizzly_study_files"] {
+                    display: none !important;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
             )
+
+        uploaded_files = st.file_uploader(
+            "Upload files (PDF, DOCX, PPTX, TXT, PNG, JPG) — max 5",
+            type=["pdf", "docx", "pptx", "txt", "png", "jpg", "jpeg"],
+            accept_multiple_files=True,
+            key="quizzly_study_files",
+            disabled=not files_mode,
+        )
         if files_mode and uploaded_files and len(uploaded_files) > 5:
             st.error("Please upload at most 5 files. Remove extras and try again.")
             uploaded_files = None
