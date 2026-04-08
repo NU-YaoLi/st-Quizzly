@@ -64,8 +64,6 @@ def _apply_pending_web_url_removal() -> None:
 
 
 def main():
-    st.title("Quizzly: Automated Quiz Generator")
-    st.markdown("Transform passive reading into active mastery. Upload documents or links to generate a verified, targeted quiz based on Bloom's Taxonomy.")
 
     # API Key Check via Streamlit Secrets
     if "OPENAI_API_KEY" not in st.secrets:
@@ -290,9 +288,12 @@ def main():
         """,
         unsafe_allow_html=True,
     )
-    col1, col2 = st.columns([2, 1], gap="large", vertical_alignment="top")
+    col1, col2 = st.columns([3, 1], gap="large", vertical_alignment="top")
     
     with col1:
+        st.title("Quizzly: Automated Quiz Generator")
+        st.markdown("Transform passive reading into active mastery. Upload documents or links to generate a verified, targeted quiz based on Bloom's Taxonomy.")
+
         if generate_btn:
             st.session_state.workflow_status_label = None
             st.session_state.workflow_status_lines = []
