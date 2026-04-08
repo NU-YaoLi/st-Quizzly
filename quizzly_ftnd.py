@@ -87,22 +87,37 @@ def main():
         files_mode = source_mode == "Upload files"
 
         # Always mount the uploader (stable key) so switching source mode does not drop uploads.
-        uploaded_files = st.file_uploader(
-            "Upload files (PDF, DOCX, PPTX, TXT, PNG, JPG) — max 5",
-            type=["pdf", "docx", "pptx", "txt", "png", "jpg", "jpeg"],
-            accept_multiple_files=True,
-            key="quizzly_study_files",
-            disabled=not files_mode,
+        # We hide it via CSS when in website mode, but keep it mounted.
+        st.markdown(
+            """
+            <style>
+            section[data-testid="stSidebar"] [class*="st-key-quizzly_file_uploader_wrap"] {
+                margin-bottom: 0.25rem;
+            }
+            /* When in website mode we hide the uploader UI, but keep it mounted. */
+            section[data-testid="stSidebar"] [class*="st-key-quizzly_file_uploader_wrap"] .quizzly-hide-uploader + div {
+                display: none !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
         )
+        wrap = st.container(key="quizzly_file_uploader_wrap")
+        # Toggle a CSS class on the keyed container by inserting a tiny marker element.
+        with wrap:
+            # Marker div used by CSS to hide the uploader when not in file mode.
+            if not files_mode:
+                st.markdown("<div class=\"quizzly-hide-uploader\"></div>", unsafe_allow_html=True)
+            uploaded_files = st.file_uploader(
+                "Upload files (PDF, DOCX, PPTX, TXT, PNG, JPG) — max 5",
+                type=["pdf", "docx", "pptx", "txt", "png", "jpg", "jpeg"],
+                accept_multiple_files=True,
+                key="quizzly_study_files",
+                disabled=not files_mode,
+            )
         if files_mode and uploaded_files and len(uploaded_files) > 5:
             st.error("Please upload at most 5 files. Remove extras and try again.")
             uploaded_files = None
-        if not files_mode and uploaded_files:
-            st.caption(
-                "Uploaded files stay in the uploader above (greyed out). "
-                "Switch back to **Upload files** to use or remove them."
-            )
-
         website_urls: list[str] = []
 
         if not files_mode:
@@ -132,7 +147,7 @@ def main():
                 unsafe_allow_html=True,
             )
             st.caption(
-                "Use **⨁** to add a row and **✕** to remove it (at least one row stays). "
+                "Use **+** to add a row and **✕** to remove it (at least one row stays). "
                 "Search-result pages often fail; prefer article URLs."
             )
             _apply_pending_web_url_removal()
@@ -166,7 +181,7 @@ def main():
                 if v:
                     website_urls.append(v)
             if st.button(
-                "⨁",
+                "+",
                 key="add_web_url_slot",
                 type="secondary",
                 disabled=(n_slots >= MAX_WEB_URL_SLOTS),
