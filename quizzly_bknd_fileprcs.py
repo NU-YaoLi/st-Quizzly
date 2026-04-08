@@ -2,6 +2,7 @@
 
 import ipaddress
 import os
+import socket
 import tempfile
 import uuid
 from urllib.parse import urlparse
@@ -13,8 +14,7 @@ from PIL import Image
 from pptx import Presentation
 from reportlab.pdfgen import canvas
 
-WEB_CHARS_PER_PAGE = 2500
-WEB_TEXT_PER_URL_CAP = 12000
+from quizzly_config import WEB_CHARS_PER_PAGE, WEB_TEXT_PER_URL_CAP
 
 
 def _is_safe_http_url(url: str) -> bool:
@@ -52,6 +52,28 @@ def _is_safe_http_url(url: str) -> bool:
         # Not an IP literal; allow (DNS-level blocking is out of scope here).
         pass
 
+    # DNS-based block: if hostname resolves to internal IPs, block.
+    try:
+        infos = socket.getaddrinfo(hostname, p.port or (443 if p.scheme == "https" else 80), type=socket.SOCK_STREAM)
+        for info in infos:
+            addr = info[4][0]
+            try:
+                ip = ipaddress.ip_address(addr)
+                if (
+                    ip.is_private
+                    or ip.is_loopback
+                    or ip.is_link_local
+                    or ip.is_multicast
+                    or ip.is_reserved
+                    or ip.is_unspecified
+                ):
+                    return False
+            except ValueError:
+                continue
+    except Exception:
+        # If DNS fails, treat as unsafe.
+        return False
+
     return True
 
 
@@ -86,7 +108,7 @@ def fetch_website_text(url: str) -> tuple[bool, str]:
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     }
 
-    resp = requests.get(url, headers=headers, timeout=20, allow_redirects=True)
+    resp = requests.get(url, headers=headers, timeout=(10, 20), allow_redirects=True)
     resp.raise_for_status()
 
     text = extract_readable_text(resp.text)
@@ -102,7 +124,7 @@ def fetch_website_text(url: str) -> tuple[bool, str]:
         if not _is_safe_http_url(fallback_url):
             return False, ""
 
-        fb = requests.get(fallback_url, headers=headers, timeout=20, allow_redirects=True)
+        fb = requests.get(fallback_url, headers=headers, timeout=(10, 20), allow_redirects=True)
         fb.raise_for_status()
         text = extract_readable_text(fb.text)
 

@@ -15,12 +15,16 @@ from quizzly_bknd_fileprcs import (
     pptx_to_pdf,
     pseudo_pages_from_web_text,
 )
+from quizzly_bknd_quizvalidate import validate_quiz_shape
 from quizzly_bknd_gnrt import setup_api, get_page_count, create_extraction_chain, create_generation_chain
 from quizzly_bknd_vrf import verify_quiz
 
-MIN_QUESTIONS = 3
-MAX_WEB_URL_SLOTS = 5
-ANSWER_LETTERS = ["A", "B", "C", "D"]
+from quizzly_config import (
+    ANSWER_LETTERS,
+    MAX_QUESTIONS_CAP,
+    MAX_WEB_URL_SLOTS,
+    MIN_QUESTIONS,
+)
 
 st.set_page_config(page_title="Quizzly", page_icon="📖", layout="wide")
 
@@ -63,7 +67,7 @@ def _apply_pending_web_url_removal() -> None:
     st.session_state.web_url_slot_count = max(1, len(new_vals))
     for i, v in enumerate(new_vals):
         st.session_state[f"web_url_{i}"] = v
-    st.rerun()
+    # No rerun here; the widgets are created after this function returns.
 
 
 def main():
@@ -142,8 +146,8 @@ def main():
             )
             _apply_pending_web_url_removal()
             n_slots = min(int(st.session_state.web_url_slot_count), MAX_WEB_URL_SLOTS)
+            st.caption(f"Website URLs")
             for i in range(n_slots):
-                st.caption(f"Website URL {i + 1}")
                 col_url, col_x = st.columns(
                     [1, 0.14], gap="small", vertical_alignment="center"
                 )
@@ -169,7 +173,22 @@ def main():
             for i in range(n_slots):
                 v = (st.session_state.get(f"web_url_{i}") or "").strip()
                 if v:
+                    # Normalize URL: default scheme to https://
+                    if "://" not in v:
+                        v = "https://" + v
                     website_urls.append(v)
+            # De-dupe URLs (case-insensitive)
+            deduped = []
+            seen = set()
+            for u in website_urls:
+                k = u.strip().lower().rstrip("/")
+                if k in seen:
+                    continue
+                seen.add(k)
+                deduped.append(u.strip())
+            if len(deduped) != len(website_urls):
+                st.warning("Duplicate URL(s) detected and will be ignored.")
+            website_urls = deduped
             if st.button(
                 "+",
                 key="add_web_url_slot",
@@ -197,7 +216,21 @@ def main():
 
             if source_mode == "Upload files":
                 st.session_state.web_text = ""
+                # Reject duplicate filenames (case-insensitive) to avoid wasting tokens.
+                seen_names = set()
+                unique_uploads = []
+                dup_names = []
                 for uf in uploaded_files:
+                    name = (os.path.basename(uf.name) or "upload").lower()
+                    if name in seen_names:
+                        dup_names.append(os.path.basename(uf.name))
+                        continue
+                    seen_names.add(name)
+                    unique_uploads.append(uf)
+                if dup_names:
+                    st.warning("Duplicate file name(s) detected and will be ignored: " + ", ".join(dup_names))
+
+                for uf in unique_uploads:
                     safe_name = os.path.basename(uf.name) or "upload"
                     temp_path = os.path.join(temp_dir, f"{uuid.uuid4().hex}_{safe_name}")
                     with open(temp_path, "wb") as f:
@@ -222,7 +255,7 @@ def main():
                     total_pages += get_page_count(new_path)
 
                 source_count = len(processed_paths)
-                max_questions = max(MIN_QUESTIONS, total_pages // 2)
+                max_questions = max(MIN_QUESTIONS, min(MAX_QUESTIONS_CAP, total_pages // 2))
 
             else:
                 st.session_state.current_paths = []
@@ -254,7 +287,7 @@ def main():
                 )
                 st.session_state.web_text = combined_web
 
-                max_questions = max(MIN_QUESTIONS, total_web_pages // 2)
+                max_questions = max(MIN_QUESTIONS, min(MAX_QUESTIONS_CAP, total_web_pages // 2))
 
             st.session_state.current_paths = processed_paths
             st.session_state.cleanup_paths = cleanup_paths
@@ -314,35 +347,13 @@ def main():
             def log_line(s: str):
                 st.session_state.workflow_status_lines.append(s)
 
-            def _validate_quiz_shape(quiz: object, expected_count: int) -> dict:
-                if not isinstance(quiz, dict):
-                    raise ValueError("Generated quiz is not a JSON object.")
-                questions = quiz.get("questions")
-                if not isinstance(questions, list):
-                    raise ValueError("Generated quiz JSON is missing 'questions' list.")
-                if len(questions) != expected_count:
-                    raise ValueError(f"Expected {expected_count} questions, got {len(questions)}.")
-                required = {"id", "difficulty", "question_text", "options", "correct_option", "explanation"}
-                for q in questions:
-                    if not isinstance(q, dict):
-                        raise ValueError("A question item is not an object.")
-                    missing = required - set(q.keys())
-                    if missing:
-                        raise ValueError(f"Question {q.get('id', '?')} missing keys: {sorted(missing)}")
-                    opts = q.get("options")
-                    if not isinstance(opts, list) or len(opts) != 4:
-                        raise ValueError(f"Question {q.get('id', '?')} must have exactly 4 options.")
-                    if q.get("correct_option") not in ANSWER_LETTERS:
-                        raise ValueError(f"Question {q.get('id', '?')} has invalid correct_option.")
-                return quiz
-
+            client = None
+            oai_file_ids: list[str] = []
             try:
                 with st.spinner("Processing document workflow…"):
                     client = setup_api()
 
                     log_line("Uploading to secure environment...")
-                    oai_file_ids = []
-
                     for fp in st.session_state.current_paths:
                         mime_type, _ = mimetypes.guess_type(fp)
                         if mime_type is None:
@@ -351,12 +362,18 @@ def main():
                         log_line(f"Uploading: {os.path.basename(fp)} | MIME: {mime_type}")
 
                         with open(fp, "rb") as f:
-                            oai_file = client.files.create(
-                                file=(os.path.basename(fp), f, mime_type),
-                                purpose="user_data"
-                            )
+                            try:
+                                oai_file = client.files.create(
+                                    file=(os.path.basename(fp), f, mime_type),
+                                    purpose="user_data"
+                                )
+                            except Exception as e:
+                                log_line(f"Failed to upload {os.path.basename(fp)}: {e}")
+                                continue
 
                         oai_file_ids.append(oai_file.id)
+                    if not oai_file_ids and not st.session_state.get("web_text", ""):
+                        raise ValueError("No materials were uploaded successfully.")
 
                     log_line("Extracting core concepts...")
                     extractor = create_extraction_chain()
@@ -375,7 +392,7 @@ def main():
                         "concepts_list": ", ".join(concepts),
                         "web_context": st.session_state.get("web_text", ""),
                     })
-                    quiz_data = _validate_quiz_shape(quiz_data, num_questions)
+                    quiz_data = validate_quiz_shape(quiz_data, num_questions)
 
                     log_line("Running quiz verification checks...")
                     report = verify_quiz(concepts, quiz_data, num_questions)
@@ -481,11 +498,13 @@ def main():
                     difficulty = q.get('difficulty', 'Unrated')
                     st.markdown(f"**{i+1}. {q['question_text']}** *(Difficulty: {difficulty})*")
                     
+                    options = q.get("options", [])
                     user_answers[q['id']] = st.radio(
-                        "Select an option:", 
-                        q['options'], 
-                        key=f"q_{q['id']}", 
-                        index=None
+                        "Select an option:",
+                        options=range(len(options)),
+                        format_func=lambda idx: options[idx],
+                        key=f"q_{q['id']}",
+                        index=None,
                     )
                     st.write("---")
                 
@@ -495,12 +514,11 @@ def main():
                     for q in st.session_state.quiz_data["questions"]:
                         user_ans = user_answers[q['id']]
                         
-                        if not user_ans:
+                        if user_ans is None:
                             st.warning(f"Question {q['id']} was left blank.")
                             continue
                         try:
-                            user_idx = q["options"].index(user_ans)
-                            user_letter = ANSWER_LETTERS[user_idx]
+                            user_letter = ANSWER_LETTERS[int(user_ans)]
                         except Exception:
                             st.warning(f"Question {q['id']} answer format was unexpected.")
                             continue
@@ -520,7 +538,7 @@ def main():
                             # Add to Error Notebook if not already there
                             error_entry = {
                                 "question": q['question_text'],
-                                "user_wrong": user_ans,
+                                "user_wrong": q["options"][int(user_ans)],
                                 "explanation": formatted_explanation
                             }
                             if error_entry not in st.session_state.error_notebook:
