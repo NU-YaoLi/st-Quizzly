@@ -87,19 +87,6 @@ def main():
         files_mode = source_mode == "Upload files"
 
         # Always mount the uploader (stable key) so switching source mode does not drop uploads.
-        # Hide it visually in website mode (but keep it mounted so state persists).
-        if not files_mode:
-            st.markdown(
-                """
-                <style>
-                section[data-testid="stSidebar"] [class*="st-key-quizzly_study_files"] {
-                    display: none !important;
-                }
-                </style>
-                """,
-                unsafe_allow_html=True,
-            )
-
         uploaded_files = st.file_uploader(
             "Upload files (PDF, DOCX, PPTX, TXT, PNG, JPG) — max 5",
             type=["pdf", "docx", "pptx", "txt", "png", "jpg", "jpeg"],
@@ -116,6 +103,11 @@ def main():
             st.markdown(
                 """
                 <style>
+                /* Hide the file uploader UI in Website links mode (keep it mounted so state persists). */
+                section[data-testid="stSidebar"] [class*="st-key-quizzly_study_files"] {
+                    display: none !important;
+                }
+
                 /* Icon-sized secondary buttons in sidebar only (not primary Generate) */
                 section[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"],
                 section[data-testid="stSidebar"] button[kind="secondary"] {
