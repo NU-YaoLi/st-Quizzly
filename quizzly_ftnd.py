@@ -14,8 +14,73 @@ import requests
 from bs4 import BeautifulSoup
 
 # Cleaned imports: no file conversion dependencies needed
-from quizzly_bknd_gnrt import setup_api, get_page_count, create_extraction_chain, create_generation_chain, process_link
+from quizzly_bknd_gnrt import setup_api, get_page_count, create_extraction_chain, create_generation_chain
 from quizzly_bknd_vrf import verify_quiz
+
+# ~2500 characters of plain text ≈ one page for quiz sizing (web sources have no PDF page count)
+WEB_CHARS_PER_PAGE = 2500
+WEB_TEXT_PER_URL_CAP = 12000
+# Each successful URL counts at least this many pseudo-pages for max-question math so one article can reach min 3 questions (ceil(6/2)).
+WEB_PAGES_FLOOR_PER_URL = 6
+MIN_QUESTIONS = 3
+
+
+def extract_readable_text(html: str) -> str:
+    soup = BeautifulSoup(html, "html.parser")
+
+    for tag in soup(["script", "style", "noscript", "header", "footer", "nav", "aside"]):
+        tag.decompose()
+
+    parts = []
+    for el in soup.find_all(["h1", "h2", "h3", "p", "li"]):
+        t = el.get_text(" ", strip=True)
+        if t:
+            parts.append(t)
+
+    text = "\n".join(parts).strip()
+
+    if len(text) < 200:
+        text = soup.get_text(separator="\n", strip=True)
+        text = "\n".join([line.strip() for line in text.splitlines() if line.strip()])
+
+    return text
+
+
+def fetch_website_text(url: str) -> tuple[bool, str]:
+    """Fetch one URL and return (ok, extracted_text). Text is capped for downstream use."""
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+
+    resp = requests.get(url, headers=headers, timeout=20, allow_redirects=True)
+    resp.raise_for_status()
+
+    text = extract_readable_text(resp.text)
+
+    if len(text) < 250:
+        if url.startswith("https://"):
+            fallback_url = "https://r.jina.ai/https://" + url[len("https://"):]
+        elif url.startswith("http://"):
+            fallback_url = "https://r.jina.ai/http://" + url[len("http://"):]
+        else:
+            fallback_url = "https://r.jina.ai/http://" + url
+
+        fb = requests.get(fallback_url, headers=headers, timeout=20, allow_redirects=True)
+        fb.raise_for_status()
+        text = extract_readable_text(fb.text)
+
+    if len(text) < 250:
+        return False, ""
+
+    return True, text[:WEB_TEXT_PER_URL_CAP]
+
+
+def pseudo_pages_from_web_text(text: str) -> int:
+    """Map extracted web text to a page count for max-question math (same formula as files: max_q ≈ pages//2)."""
+    if not text:
+        return 0
+    return max(1, len(text) // WEB_CHARS_PER_PAGE)
 
 
 def docx_to_pdf(input_path):
@@ -99,27 +164,53 @@ def main():
     # --- Sidebar: Upload & Settings ---
     with st.sidebar:
         st.header("Study Materials")
-        
-        # Support for multiple files and various types natively
-        uploaded_files = st.file_uploader(
-            "Upload files (PDF, DOCX, PPTX, TXT, PNG)", 
-            type=["pdf", "docx", "pptx", "txt", "png"], 
-            accept_multiple_files=True
-        )
-        
-        # Support for a website link
-        website_link = st.text_input("Or enter a website link")
-        
-        num_questions = 1 # Default
-        generate_btn = False # Initialize button state
-        
-        if uploaded_files or website_link:
-            total_pages = 0
-            temp_dir = tempfile.gettempdir()
-            processed_paths = [] 
 
-            # Process uploaded files directly
-            if uploaded_files:
+        source_mode = st.radio(
+            "Material source (choose one)",
+            ["Upload files", "Website links"],
+            horizontal=True,
+            help="Use either uploaded files (up to 5) or website URLs (up to 3), not both.",
+        )
+
+        uploaded_files = None
+        website_urls: list[str] = []
+
+        if source_mode == "Upload files":
+            uploaded_files = st.file_uploader(
+                "Upload files (PDF, DOCX, PPTX, TXT, PNG) — max 5",
+                type=["pdf", "docx", "pptx", "txt", "png"],
+                accept_multiple_files=True,
+            )
+            if uploaded_files and len(uploaded_files) > 5:
+                st.error("Please upload at most 5 files. Remove extras and try again.")
+                uploaded_files = None
+        else:
+            st.caption("Enter up to 3 URLs (one per field). Google search pages often fail; use article links.")
+            u1 = st.text_input("Website URL 1", key="web_url_1")
+            u2 = st.text_input("Website URL 2", key="web_url_2")
+            u3 = st.text_input("Website URL 3", key="web_url_3")
+            website_urls = [u.strip() for u in (u1, u2, u3) if u and u.strip()]
+            if len(website_urls) > 3:
+                website_urls = website_urls[:3]
+
+        num_questions = MIN_QUESTIONS
+        generate_btn = False
+
+        has_files = bool(uploaded_files)
+        has_urls = bool(website_urls)
+
+        if (source_mode == "Upload files" and has_files) or (source_mode == "Website links" and has_urls):
+            temp_dir = tempfile.gettempdir()
+            processed_paths: list[str] = []
+            total_pages = 0
+            web_blocks: list[tuple[str, str]] = []
+            web_fetch_errors: list[str] = []
+            source_count = 0
+            files_eligible = False
+            web_eligible = False
+
+            if source_mode == "Upload files":
+                st.session_state.web_text = ""
                 for uf in uploaded_files:
                     temp_path = os.path.join(temp_dir, uf.name)
                     with open(temp_path, "wb") as f:
@@ -127,7 +218,6 @@ def main():
 
                     ext = os.path.splitext(temp_path)[1].lower()
 
-                    # 2. Kept all of your original conversion logic intact
                     if ext == ".docx":
                         new_path = docx_to_pdf(temp_path)
                     elif ext == ".pptx":
@@ -135,110 +225,104 @@ def main():
                     elif ext in [".png", ".jpg", ".jpeg"]:
                         new_path = image_to_pdf(temp_path)
                     else:
-                        new_path = temp_path  # already PDF or TXT
+                        new_path = temp_path
 
                     processed_paths.append(new_path)
                     total_pages += get_page_count(new_path)
-                    
-            # Process website link
-            web_text = ""
-            website_ok = True
 
-            def extract_readable_text(html: str) -> str:
-                soup = BeautifulSoup(html, "html.parser")
+                source_count = len(processed_paths)
+                raw_max = total_pages // 2
+                files_eligible = raw_max >= MIN_QUESTIONS
+                max_questions = raw_max if files_eligible else MIN_QUESTIONS
+                st.caption(
+                    f"Max questions = total pages ÷ 2 (minimum quiz size is {MIN_QUESTIONS}). "
+                    f"Your files: **{total_pages}** page(s) → cap **{raw_max}**."
+                )
+                if not files_eligible:
+                    st.warning(
+                        f"Need at least {MIN_QUESTIONS * 2} total pages to allow a {MIN_QUESTIONS}-question quiz "
+                        f"(current cap from pages ÷ 2 is {raw_max}). Add more files or pages."
+                    )
 
-                for tag in soup(["script", "style", "noscript", "header", "footer", "nav", "aside"]):
-                    tag.decompose()
-
-                # Prefer content-like tags (reduces nav / boilerplate)
-                parts = []
-                for el in soup.find_all(["h1", "h2", "h3", "p", "li"]):
-                    t = el.get_text(" ", strip=True)
-                    if t:
-                        parts.append(t)
-
-                text = "\n".join(parts).strip()
-
-                # Fallback if paragraphs not found
-                if len(text) < 200:
-                    text = soup.get_text(separator="\n", strip=True)
-                    text = "\n".join([line.strip() for line in text.splitlines() if line.strip()])
-
-                return text
-
-
-            if website_link:
-                try:
-                    headers = {
-                        "User-Agent": "Mozilla/5.0",
-                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                    }
-
-                    resp = requests.get(website_link, headers=headers, timeout=20, allow_redirects=True)
-                    resp.raise_for_status()
-
-                    text = extract_readable_text(resp.text)
-
-                    # If too short, try jina.ai fallback (often bypasses bot/JS issues)
-                    if len(text) < 250:
-                        # preserve scheme for jina
-                        if website_link.startswith("https://"):
-                            fallback_url = "https://r.jina.ai/https://" + website_link[len("https://"):]
-                        elif website_link.startswith("http://"):
-                            fallback_url = "https://r.jina.ai/http://" + website_link[len("http://"):]
+            else:
+                st.session_state.current_paths = []
+                for url in website_urls:
+                    try:
+                        ok, chunk = fetch_website_text(url)
+                        if ok and chunk:
+                            web_blocks.append((url, chunk))
                         else:
-                            fallback_url = "https://r.jina.ai/http://" + website_link
+                            web_fetch_errors.append(
+                                f"{url}: too little readable text (try a direct article, not a search results page)."
+                            )
+                    except Exception as e:
+                        web_fetch_errors.append(f"{url}: {e}")
 
-                        fb = requests.get(fallback_url, headers=headers, timeout=20, allow_redirects=True)
-                        fb.raise_for_status()
-                        # jina returns already-readable text often; still run through extractor safely
-                        text = extract_readable_text(fb.text)
+                if web_fetch_errors:
+                    for msg in web_fetch_errors:
+                        st.error(msg)
 
-                    if len(text) < 250:
-                        website_ok = False
-                        st.error(
-                            "Website content cannot be fetched (too little readable text). "
-                            "This often happens on Google/JS-heavy pages. Try a direct article URL or upload a file."
-                        )
-                    else:
-                        web_text = text[:12000]
-                        st.session_state.web_text = web_text
-                        total_pages += 1
+                source_count = len(web_blocks)
+                total_web_pages = sum(
+                    max(WEB_PAGES_FLOOR_PER_URL, pseudo_pages_from_web_text(t)) for _, t in web_blocks
+                )
+                if not web_blocks:
+                    total_web_pages = 0
 
-                        # Optional but VERY useful debugging:
-                        # with st.expander("Website fetch debug"):
-                        #     st.write(f"Extracted chars: {len(text)}")
-                        #     st.code(web_text[:1000])
+                combined_web = "\n\n---\n\n".join(
+                    f"Source: {u}\n\n{t}" for u, t in web_blocks
+                )
+                st.session_state.web_text = combined_web
 
-                except Exception as e:
-                    website_ok = False
-                    st.error(f"Website content cannot be fetched: {e}")
-                    
+                raw_max = total_web_pages // 2
+                web_eligible = raw_max >= MIN_QUESTIONS
+                max_questions = raw_max if web_eligible else MIN_QUESTIONS
+                st.caption(
+                    f"Max questions = estimated pages ÷ 2 (same idea as files). "
+                    f"Each link counts at least **{WEB_PAGES_FLOOR_PER_URL}** pseudo-pages, plus more for long text "
+                    f"(~{WEB_CHARS_PER_PAGE} characters ≈ 1 page). "
+                    f"Estimated **{total_web_pages}** page(s) from **{source_count}** link(s) → cap **{raw_max}**."
+                )
+                if web_blocks and not web_eligible:
+                    st.warning(
+                        f"Fetched text is too short for a {MIN_QUESTIONS}-question cap (effective pages ÷ 2 = {raw_max}). "
+                        "Try longer articles or more URLs."
+                    )
+
             st.session_state.current_paths = processed_paths
-                    
-            # Fallback if page count couldn't be parsed
-            if total_pages == 0:
-                total_pages = 1
-                
-            max_questions = max(3, total_pages // 2)
-            
-            # 4. Changed valid_paths to processed_paths
-            st.success(f"Materials Loaded: {len(processed_paths)} sources detected.")
-            st.info(f"To maintain context quality, max questions is set to {max_questions}.")
-            
+
+            if source_count == 0:
+                st.warning("Materials loaded: 0 sources — check your URLs or switch to file upload.")
+            else:
+                st.success(f"Materials Loaded: {source_count} source(s) detected.")
+            if source_mode == "Upload files":
+                eligible = files_eligible
+            else:
+                eligible = bool(web_blocks) and web_eligible
+
+            if eligible:
+                st.info(f"To maintain context quality, max questions is set to {max_questions}.")
+
             st.header("Quiz Settings")
-            num_questions = st.number_input(
-                "Number of Questions",
-                min_value=3,
-                max_value=max_questions,
-                value=3
-            )
-            
-            # Store validated paths in session state for processing block
+            if eligible:
+                num_questions = st.number_input(
+                    "Number of Questions",
+                    min_value=MIN_QUESTIONS,
+                    max_value=max_questions,
+                    value=MIN_QUESTIONS,
+                )
+            else:
+                st.caption("Not enough material for the minimum quiz size; increase pages or web text to choose question count.")
+                num_questions = MIN_QUESTIONS
+
             st.session_state.current_paths = processed_paths
-            can_generate = bool(processed_paths) or (bool(website_link) and website_ok)
+            if source_mode == "Upload files":
+                can_generate = bool(processed_paths) and files_eligible
+            else:
+                can_generate = bool(web_blocks) and web_eligible
+
             if not can_generate:
-                st.info("Fix the website link (or upload a file) to generate a quiz.")
+                st.info("Add valid material (files or fetchable URLs) to generate a quiz.")
             generate_btn = st.button("Generate & Verify Quiz", type="primary", disabled=(not can_generate))
 
     # --- Main Area: Processing & Display ---
@@ -312,7 +396,7 @@ def main():
                         "web_context": st.session_state.get("web_text", "")
                     })
                     
-                    log_line(f"Uploading: {fp} | MIME: {mime_type}")
+                    log_line("Running quiz verification checks...")
                     report = verify_quiz(concepts, quiz_data, num_questions)
                     
                     st.session_state.verification_report = report
