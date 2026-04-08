@@ -20,7 +20,21 @@ from quizzly_bknd_upldprcs import (
     pseudo_pages_from_web_text,
 )
 from quizzly_bknd_gnrt import setup_api, get_page_count, create_extraction_chain, create_generation_chain
-from quizzly_bknd_vrf import validate_quiz_shape, verify_quiz
+
+try:
+    # Streamlit Cloud can temporarily run a stale build; make this import robust.
+    from quizzly_bknd_vrf import validate_quiz_shape, verify_quiz
+except Exception as _e:  # pragma: no cover
+    def verify_quiz(*args, **kwargs):  # type: ignore[no-redef]
+        raise RuntimeError(f"Failed to import verification module: {_e}")
+
+    def validate_quiz_shape(quiz, expected_count: int):  # type: ignore[no-redef]
+        # Minimal fallback so the app can still run if Cloud build is stale.
+        if not isinstance(quiz, dict) or "questions" not in quiz:
+            raise ValueError("Generated quiz JSON is missing 'questions'.")
+        if not isinstance(quiz["questions"], list) or len(quiz["questions"]) != expected_count:
+            raise ValueError("Generated quiz JSON has unexpected question count.")
+        return quiz
 
 from quizzly_config import (
     ANSWER_LETTERS,
