@@ -5,26 +5,37 @@ import time
 import traceback
 import uuid
 
+import hashlib
+
 import streamlit as st
 from openai import OpenAIError
 
-from quizzly_bknd_fileprcs import (
+from quizzly_bknd_upldprcs import (
+    PENDING_REMOVE_URL_INDEX,
+    apply_pending_web_url_removal,
     docx_to_pdf,
     fetch_website_text,
     image_to_pdf,
     pptx_to_pdf,
     pseudo_pages_from_web_text,
 )
-from quizzly_bknd_quizvalidate import validate_quiz_shape
 from quizzly_bknd_gnrt import setup_api, get_page_count, create_extraction_chain, create_generation_chain
-from quizzly_bknd_vrf import verify_quiz
+from quizzly_bknd_vrf import validate_quiz_shape, verify_quiz
 
 from quizzly_config import (
     ANSWER_LETTERS,
     MAX_QUESTIONS_CAP,
+    MAX_QUESTIONS_PER_SOURCE,
     MAX_WEB_URL_SLOTS,
+    FILE_FINGERPRINT_BYTES,
     MIN_QUESTIONS,
+    WEB_FETCH_CACHE_TTL_SECS,
 )
+
+
+@st.cache_data(ttl=WEB_FETCH_CACHE_TTL_SECS, show_spinner=False)
+def _cached_fetch_website_text(url: str) -> tuple[bool, str, str]:
+    return fetch_website_text(url)
 
 st.set_page_config(page_title="Quizzly", page_icon="📖", layout="wide")
 
@@ -47,27 +58,6 @@ if "workflow_status_lines" not in st.session_state:
     st.session_state.workflow_status_lines = []
 if "web_url_slot_count" not in st.session_state:
     st.session_state.web_url_slot_count = 1
-
-_PENDING_REMOVE_URL_INDEX = "_pending_remove_url_index"
-
-
-def _apply_pending_web_url_removal() -> None:
-    """Apply a URL row removal on a fresh run, before widgets mount (avoids Streamlit widget state errors)."""
-    pending = st.session_state.pop(_PENDING_REMOVE_URL_INDEX, None)
-    if pending is None:
-        return
-    n = min(int(st.session_state.web_url_slot_count), MAX_WEB_URL_SLOTS)
-    if n <= 1 or pending < 0 or pending >= n:
-        return
-    vals = [str(st.session_state.get(f"web_url_{i}", "") or "") for i in range(n)]
-    new_vals = vals[:pending] + vals[pending + 1 :]
-    for k in list(st.session_state.keys()):
-        if isinstance(k, str) and k.startswith("web_url_") and k[8:].isdigit():
-            del st.session_state[k]
-    st.session_state.web_url_slot_count = max(1, len(new_vals))
-    for i, v in enumerate(new_vals):
-        st.session_state[f"web_url_{i}"] = v
-    # No rerun here; the widgets are created after this function returns.
 
 
 def main():
@@ -144,7 +134,7 @@ def main():
                 "Use **+** to add a row and **✕** to remove it (at least one row stays). "
                 "Search-result pages often fail; prefer article URLs."
             )
-            _apply_pending_web_url_removal()
+            apply_pending_web_url_removal()
             n_slots = min(int(st.session_state.web_url_slot_count), MAX_WEB_URL_SLOTS)
             st.caption(f"Website URLs")
             for i in range(n_slots):
@@ -167,7 +157,7 @@ def main():
                         help="Remove this URL field",
                         use_container_width=True,
                     ):
-                        st.session_state[_PENDING_REMOVE_URL_INDEX] = i
+                        st.session_state[PENDING_REMOVE_URL_INDEX] = i
                         st.rerun()
             website_urls = []
             for i in range(n_slots):
@@ -199,6 +189,8 @@ def main():
                 st.session_state.web_url_slot_count = min(n_slots + 1, MAX_WEB_URL_SLOTS)
                 st.rerun()
 
+        verbose_logs = st.checkbox("Verbose workflow logs", value=False)
+
         num_questions = MIN_QUESTIONS
         generate_btn = False
 
@@ -217,18 +209,22 @@ def main():
             if source_mode == "Upload files":
                 st.session_state.web_text = ""
                 # Reject duplicate filenames (case-insensitive) to avoid wasting tokens.
-                seen_names = set()
+                seen_fps = set()
                 unique_uploads = []
-                dup_names = []
+                dup_notes = []
                 for uf in uploaded_files:
-                    name = (os.path.basename(uf.name) or "upload").lower()
-                    if name in seen_names:
-                        dup_names.append(os.path.basename(uf.name))
+                    safe_name = os.path.basename(uf.name) or "upload"
+                    buf = uf.getbuffer()
+                    size = len(buf)
+                    head = bytes(buf[:FILE_FINGERPRINT_BYTES])
+                    fp = (safe_name.lower(), size, hashlib.sha256(head).hexdigest())
+                    if fp in seen_fps:
+                        dup_notes.append(safe_name)
                         continue
-                    seen_names.add(name)
+                    seen_fps.add(fp)
                     unique_uploads.append(uf)
-                if dup_names:
-                    st.warning("Duplicate file name(s) detected and will be ignored: " + ", ".join(dup_names))
+                if dup_notes:
+                    st.warning("Duplicate file(s) detected and will be ignored: " + ", ".join(dup_notes))
 
                 for uf in unique_uploads:
                     safe_name = os.path.basename(uf.name) or "upload"
@@ -255,19 +251,27 @@ def main():
                     total_pages += get_page_count(new_path)
 
                 source_count = len(processed_paths)
-                max_questions = max(MIN_QUESTIONS, min(MAX_QUESTIONS_CAP, total_pages // 2))
+                max_questions = max(
+                    MIN_QUESTIONS,
+                    min(MAX_QUESTIONS_CAP, total_pages // 2, source_count * MAX_QUESTIONS_PER_SOURCE),
+                )
 
             else:
                 st.session_state.current_paths = []
                 for url in website_urls:
                     try:
-                        ok, chunk = fetch_website_text(url)
+                        ok, chunk, reason = _cached_fetch_website_text(url)
                         if ok and chunk:
                             web_blocks.append((url, chunk))
                         else:
-                            web_fetch_errors.append(
-                                f"{url}: too little readable text (try a direct article, not a search results page)."
-                            )
+                            if reason in {"blocked_localhost", "blocked_private_ip", "invalid_scheme"}:
+                                web_fetch_errors.append(f"{url}: blocked for safety ({reason}).")
+                            elif reason == "dns_failed":
+                                web_fetch_errors.append(f"{url}: DNS lookup failed.")
+                            elif reason == "request_failed":
+                                web_fetch_errors.append(f"{url}: request failed (timeout/blocked).")
+                            else:
+                                web_fetch_errors.append(f"{url}: too little readable text.")
                     except Exception as e:
                         web_fetch_errors.append(f"{url}: {e}")
 
@@ -288,6 +292,10 @@ def main():
                 st.session_state.web_text = combined_web
 
                 max_questions = max(MIN_QUESTIONS, min(MAX_QUESTIONS_CAP, total_web_pages // 2))
+                max_questions = max(
+                    MIN_QUESTIONS,
+                    min(MAX_QUESTIONS_CAP, total_web_pages // 2, source_count * MAX_QUESTIONS_PER_SOURCE),
+                )
 
             st.session_state.current_paths = processed_paths
             st.session_state.cleanup_paths = cleanup_paths
@@ -347,6 +355,10 @@ def main():
             def log_line(s: str):
                 st.session_state.workflow_status_lines.append(s)
 
+            def log_detail(s: str):
+                if verbose_logs:
+                    st.session_state.workflow_status_lines.append(s)
+
             client = None
             oai_file_ids: list[str] = []
             try:
@@ -359,7 +371,7 @@ def main():
                         if mime_type is None:
                             mime_type = "application/octet-stream"
 
-                        log_line(f"Uploading: {os.path.basename(fp)} | MIME: {mime_type}")
+                        log_detail(f"Uploading: {os.path.basename(fp)} | MIME: {mime_type}")
 
                         with open(fp, "rb") as f:
                             try:

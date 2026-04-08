@@ -8,33 +8,62 @@ import uuid
 from urllib.parse import urlparse
 
 import requests
+import streamlit as st
 from bs4 import BeautifulSoup
 from docx import Document
 from PIL import Image
 from pptx import Presentation
 from reportlab.pdfgen import canvas
 
-from quizzly_config import WEB_CHARS_PER_PAGE, WEB_TEXT_PER_URL_CAP
+from quizzly_config import MAX_WEB_URL_SLOTS, WEB_CHARS_PER_PAGE, WEB_TEXT_PER_URL_CAP
+
+PENDING_REMOVE_URL_INDEX = "_pending_remove_url_index"
 
 
-def _is_safe_http_url(url: str) -> bool:
-    """Basic SSRF guard: allow only http/https and block localhost/private IP literals."""
+def apply_pending_web_url_removal() -> None:
+    """
+    Apply a URL row removal before URL widgets mount.
+
+    This avoids Streamlit widget state errors by shifting values in session_state
+    before rendering the text_input widgets.
+    """
+    pending = st.session_state.pop(PENDING_REMOVE_URL_INDEX, None)
+    if pending is None:
+        return
+    n = min(int(st.session_state.get("web_url_slot_count", 1)), MAX_WEB_URL_SLOTS)
+    if n <= 1 or pending < 0 or pending >= n:
+        return
+
+    vals = [str(st.session_state.get(f"web_url_{i}", "") or "") for i in range(n)]
+    new_vals = vals[:pending] + vals[pending + 1 :]
+
+    for k in list(st.session_state.keys()):
+        if isinstance(k, str) and k.startswith("web_url_") and k[8:].isdigit():
+            del st.session_state[k]
+
+    st.session_state["web_url_slot_count"] = max(1, len(new_vals))
+    for i, v in enumerate(new_vals):
+        st.session_state[f"web_url_{i}"] = v
+
+
+def _check_http_url_safety(url: str) -> tuple[bool, str]:
+    """SSRF guard: allow only http/https and block localhost/private IPs (including DNS-resolved)."""
     try:
         p = urlparse(url)
     except Exception:
-        return False
+        return False, "invalid_url"
 
     if p.scheme not in {"http", "https"}:
-        return False
+        return False, "invalid_scheme"
     if not p.netloc:
-        return False
+        return False, "missing_host"
 
     hostname = (p.hostname or "").strip().lower()
     if not hostname:
-        return False
+        return False, "missing_host"
 
     if hostname in {"localhost"} or hostname.endswith(".localhost") or hostname.endswith(".local"):
-        return False
+        return False, "blocked_localhost"
 
     # If hostname is an IP literal, block private/internal ranges.
     try:
@@ -47,9 +76,9 @@ def _is_safe_http_url(url: str) -> bool:
             or ip.is_reserved
             or ip.is_unspecified
         ):
-            return False
+            return False, "blocked_private_ip"
     except ValueError:
-        # Not an IP literal; allow (DNS-level blocking is out of scope here).
+        # Not an IP literal; continue with DNS checks.
         pass
 
     # DNS-based block: if hostname resolves to internal IPs, block.
@@ -67,14 +96,14 @@ def _is_safe_http_url(url: str) -> bool:
                     or ip.is_reserved
                     or ip.is_unspecified
                 ):
-                    return False
+                    return False, "blocked_private_ip"
             except ValueError:
                 continue
     except Exception:
         # If DNS fails, treat as unsafe.
-        return False
+        return False, "dns_failed"
 
-    return True
+    return True, "ok"
 
 
 def extract_readable_text(html: str) -> str:
@@ -98,18 +127,22 @@ def extract_readable_text(html: str) -> str:
     return text
 
 
-def fetch_website_text(url: str) -> tuple[bool, str]:
-    """Fetch one URL and return (ok, extracted_text). Text is capped for downstream use."""
-    if not _is_safe_http_url(url):
-        return False, ""
+def fetch_website_text(url: str) -> tuple[bool, str, str]:
+    """Fetch one URL and return (ok, extracted_text, reason). Text is capped for downstream use."""
+    safe, reason = _check_http_url_safety(url)
+    if not safe:
+        return False, "", reason
 
     headers = {
         "User-Agent": "Mozilla/5.0",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     }
 
-    resp = requests.get(url, headers=headers, timeout=(10, 20), allow_redirects=True)
-    resp.raise_for_status()
+    try:
+        resp = requests.get(url, headers=headers, timeout=(10, 20), allow_redirects=True)
+        resp.raise_for_status()
+    except Exception:
+        return False, "", "request_failed"
 
     text = extract_readable_text(resp.text)
 
@@ -121,17 +154,21 @@ def fetch_website_text(url: str) -> tuple[bool, str]:
         else:
             fallback_url = "https://r.jina.ai/http://" + url
 
-        if not _is_safe_http_url(fallback_url):
-            return False, ""
+        safe_fb, reason_fb = _check_http_url_safety(fallback_url)
+        if not safe_fb:
+            return False, "", reason_fb
 
-        fb = requests.get(fallback_url, headers=headers, timeout=(10, 20), allow_redirects=True)
-        fb.raise_for_status()
-        text = extract_readable_text(fb.text)
+        try:
+            fb = requests.get(fallback_url, headers=headers, timeout=(10, 20), allow_redirects=True)
+            fb.raise_for_status()
+            text = extract_readable_text(fb.text)
+        except Exception:
+            return False, "", "request_failed"
 
     if len(text) < 250:
-        return False, ""
+        return False, "", "too_little_text"
 
-    return True, text[:WEB_TEXT_PER_URL_CAP]
+    return True, text[:WEB_TEXT_PER_URL_CAP], "ok"
 
 
 def pseudo_pages_from_web_text(text: str) -> int:
