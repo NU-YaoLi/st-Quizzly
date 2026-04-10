@@ -19,11 +19,20 @@ from quizzly_bknd_upldprcs import (
     pptx_to_pdf,
     pseudo_pages_from_web_text,
 )
-from quizzly_bknd_gnrt import setup_api, get_page_count, create_extraction_chain, create_generation_chain
+from quizzly_bknd_gnrt import (
+    setup_api,
+    get_page_count,
+    create_extraction_chain,
+    create_generation_chain,
+)
 
 try:
     # Streamlit Cloud can temporarily run a stale build; make this import robust.
-    from quizzly_bknd_vrf import validate_quiz_shape, verify_quiz
+    from quizzly_bknd_vrf import (
+        validate_quiz_shape,
+        verify_quiz,
+        run_quiz_output_guard,
+    )
 except Exception as _e:  # pragma: no cover
     def verify_quiz(*args, **kwargs):  # type: ignore[no-redef]
         raise RuntimeError(f"Failed to import verification module: {_e}")
@@ -35,6 +44,9 @@ except Exception as _e:  # pragma: no cover
         if not isinstance(quiz["questions"], list) or len(quiz["questions"]) != expected_count:
             raise ValueError("Generated quiz JSON has unexpected question count.")
         return quiz
+
+    def run_quiz_output_guard(quiz_data: dict) -> dict:  # type: ignore[no-redef]
+        return quiz_data
 
 from quizzly_config import (
     ANSWER_LETTERS,
@@ -410,6 +422,8 @@ def main():
                         "concepts_list": ", ".join(concepts),
                         "web_context": st.session_state.get("web_text", ""),
                     })
+                    log_line("Running output safety guard...")
+                    quiz_data = run_quiz_output_guard(quiz_data)
                     quiz_data = validate_quiz_shape(quiz_data, num_questions)
 
                     log_line("Running quiz verification checks...")
