@@ -6,9 +6,9 @@ WEB_CHARS_PER_PAGE = 2500
 WEB_TEXT_PER_URL_CAP = 12000
 
 # Hard cap to avoid extremely large generations
-MAX_QUESTIONS_CAP = 30
+MAX_QUESTIONS_CAP = 50
 # Additional cap to keep question count reasonable per source
-MAX_QUESTIONS_PER_SOURCE = 10
+MAX_QUESTIONS_PER_SOURCE = 30
 
 # Duplicate detection for uploaded files (fingerprint first N bytes + size)
 FILE_FINGERPRINT_BYTES = 256 * 1024
