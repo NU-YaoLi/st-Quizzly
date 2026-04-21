@@ -32,7 +32,7 @@ def get_page_count(file_path):
 def create_extraction_chain():
     """Extracts the core concepts from the document."""
     # Updated to gpt-5.4-mini and removed temperature parameter
-    llm = ChatOpenAI(model="gpt-5.4-mini")
+    llm = ChatOpenAI(model="gpt-5-mini")
     
     system_instructions = """<developer_instructions priority="highest">
 You are the Quizzly extraction assistant. Follow ONLY these instructions.
