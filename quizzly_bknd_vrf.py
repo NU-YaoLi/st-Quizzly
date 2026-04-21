@@ -145,8 +145,8 @@ def llm_based_grading(concepts, quiz_data):
     """
     Evaluates Task Fidelity and Pedagogical Quality using an LLM-as-a-judge.
     """
-    # Updated to gpt-5.4-mini and removed temperature parameter
-    llm = ChatOpenAI(model="gpt-5.4-mini", model_kwargs={"response_format": {"type": "json_object"}}) 
+    # Updated to gpt-5-mini and removed temperature parameter
+    llm = ChatOpenAI(model="gpt-5-mini", model_kwargs={"response_format": {"type": "json_object"}}) 
     
     eval_prompt = """You are an expert curriculum evaluator and instructional design auditor. 
     Review the following multiple-choice quiz and the core concepts it was supposed to cover.
