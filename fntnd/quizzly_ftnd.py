@@ -175,6 +175,8 @@ st.set_page_config(page_title="Quizzly", page_icon="📖", layout="wide")
 st.session_state.setdefault("web_text", "")
 st.session_state.setdefault("_persisted_answers", {})
 st.session_state.setdefault("_last_autosave_hash", None)
+st.session_state.setdefault("_quiz_submitted", False)
+st.session_state.setdefault("_last_graded_hash", None)
 if "quiz_data" not in st.session_state:
     st.session_state.quiz_data = None
 if "error_notebook" not in st.session_state:
@@ -581,6 +583,8 @@ def main():
                     st.session_state.verification_report = report
                     st.session_state.quiz_data = quiz_data
                     st.session_state._persisted_answers = {}
+                    st.session_state._quiz_submitted = False
+                    st.session_state._last_graded_hash = None
 
                     _persist_quiz_state(
                         client_id,
@@ -682,6 +686,7 @@ def main():
             with st.form("quiz_form"):
                 user_answers = {}
                 persisted_answers = st.session_state.get("_persisted_answers") or {}
+                show_feedback = bool(st.session_state.get("_quiz_submitted"))
                 for i, q in enumerate(quiz_data.get("questions", [])):
                     difficulty = q.get("difficulty", "Unrated")
                     st.markdown(
@@ -695,12 +700,34 @@ def main():
                         if saved_idx is not None:
                             st.session_state[widget_key] = saved_idx
                     user_answers[q["id"]] = st.radio(
-                        "Select an option:",
+                        "Answer",
                         options=range(len(options)),
                         format_func=lambda idx: options[idx],
                         key=widget_key,
                         index=None,
+                        label_visibility="collapsed",
                     )
+
+                    if show_feedback:
+                        user_ans_now = st.session_state.get(widget_key)
+                        if user_ans_now is None:
+                            st.warning("This question was left blank.")
+                        else:
+                            try:
+                                user_letter = ANSWER_LETTERS[int(user_ans_now)]
+                            except Exception:
+                                st.warning("Answer format was unexpected.")
+                            else:
+                                formatted_explanation = q["explanation"].replace("\n", "\n\n")
+                                if user_letter == q["correct_option"]:
+                                    st.success("Correct ✅")
+                                    with st.expander("Show detailed explanation"):
+                                        st.markdown(formatted_explanation)
+                                else:
+                                    st.error(
+                                        f"Incorrect. The answer is {q['correct_option']}."
+                                    )
+                                    st.info(formatted_explanation)
                     st.write("---")
 
                 qp_now = _get_query_params()
@@ -726,44 +753,34 @@ def main():
                 submitted = st.form_submit_button("Submit Answers")
 
                 if submitted:
-                    for q in quiz_data.get("questions", []):
-                        user_ans = user_answers[q["id"]]
-
-                        if user_ans is None:
-                            st.warning(f"Question {q['id']} was left blank.")
-                            continue
-                        try:
-                            user_letter = ANSWER_LETTERS[int(user_ans)]
-                        except Exception:
-                            st.warning(f"Question {q['id']} answer format was unexpected.")
-                            continue
-
-                        formatted_explanation = q["explanation"].replace("\n", "\n\n")
-
-                        if user_letter == q["correct_option"]:
-                            st.success(f"**Q{q['id']}:** Correct! ✅")
-                            with st.expander("Show detailed explanation"):
-                                st.markdown(formatted_explanation)
-                        else:
-                            st.error(
-                                f"**Q{q['id']}:** Incorrect. The answer is {q['correct_option']}."
-                            )
-                            st.info(formatted_explanation)
-
-                            error_entry = {
-                                "question": q["question_text"],
-                                "user_wrong": q["options"][int(user_ans)],
-                                "explanation": formatted_explanation,
-                            }
-                            if error_entry not in st.session_state.error_notebook:
-                                st.session_state.error_notebook.append(error_entry)
-
                     quiz_id_now = (qp.get("quiz") or "").strip()
                     if quiz_id_now:
                         answers_snapshot = {
                             str(qid): (None if idx is None else int(idx))
                             for qid, idx in user_answers.items()
                         }
+                        grade_hash = _sha256_text(json.dumps(answers_snapshot, sort_keys=True))
+                        if st.session_state.get("_last_graded_hash") != grade_hash:
+                            st.session_state._last_graded_hash = grade_hash
+                            for q in quiz_data.get("questions", []):
+                                user_ans = user_answers.get(q["id"])
+                                if user_ans is None:
+                                    continue
+                                try:
+                                    user_letter = ANSWER_LETTERS[int(user_ans)]
+                                except Exception:
+                                    continue
+                                if user_letter != q["correct_option"]:
+                                    formatted_explanation = q["explanation"].replace("\n", "\n\n")
+                                    error_entry = {
+                                        "question": q["question_text"],
+                                        "user_wrong": q["options"][int(user_ans)],
+                                        "explanation": formatted_explanation,
+                                    }
+                                    if error_entry not in st.session_state.error_notebook:
+                                        st.session_state.error_notebook.append(error_entry)
+
+                        st.session_state._quiz_submitted = True
                         _persist_quiz_state(
                             client_id,
                             quiz_id_now,
@@ -772,6 +789,7 @@ def main():
                             error_notebook=st.session_state.error_notebook,
                             answers=answers_snapshot,
                         )
+                    st.rerun()
 
     with col2:
         with st.container(
