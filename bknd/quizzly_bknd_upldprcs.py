@@ -18,6 +18,11 @@ from reportlab.pdfgen import canvas
 from quizzly_config import MAX_WEB_URL_SLOTS, WEB_CHARS_PER_PAGE, WEB_TEXT_PER_URL_CAP
 
 PENDING_REMOVE_URL_INDEX = "_pending_remove_url_index"
+MAX_REDIRECTS = 5
+
+# Defensive: prevent decompression-bomb style images from consuming huge RAM.
+# (Pillow raises DecompressionBombError / warnings when exceeded.)
+Image.MAX_IMAGE_PIXELS = 20_000_000
 
 
 def apply_pending_web_url_removal() -> None:
@@ -133,43 +138,42 @@ def extract_readable_text(html: str) -> str:
 
 def fetch_website_text(url: str) -> tuple[bool, str, str]:
     """Fetch one URL and return (ok, extracted_text, reason). Text is capped for downstream use."""
-    safe, reason = _check_http_url_safety(url)
-    if not safe:
-        return False, "", reason
-
     headers = {
         "User-Agent": "Mozilla/5.0",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     }
 
-    try:
-        resp = requests.get(url, headers=headers, timeout=(10, 20), allow_redirects=True)
-        resp.raise_for_status()
-    except Exception:
-        return False, "", "request_failed"
-
-    text = extract_readable_text(resp.text)
-
-    if len(text) < 250:
-        if url.startswith("https://"):
-            fallback_url = "https://r.jina.ai/https://" + url[len("https://") :]
-        elif url.startswith("http://"):
-            fallback_url = "https://r.jina.ai/http://" + url[len("http://") :]
-        else:
-            fallback_url = "https://r.jina.ai/http://" + url
-
-        safe_fb, reason_fb = _check_http_url_safety(fallback_url)
-        if not safe_fb:
-            return False, "", reason_fb
+    # SSRF-safe fetch: validate each redirect hop (and disallow proxy fallbacks).
+    current = url
+    for _ in range(MAX_REDIRECTS + 1):
+        safe, reason = _check_http_url_safety(current)
+        if not safe:
+            return False, "", reason
 
         try:
-            fb = requests.get(
-                fallback_url, headers=headers, timeout=(10, 20), allow_redirects=True
+            resp = requests.get(
+                current, headers=headers, timeout=(10, 20), allow_redirects=False
             )
-            fb.raise_for_status()
-            text = extract_readable_text(fb.text)
         except Exception:
             return False, "", "request_failed"
+
+        # Follow redirects manually so we can safety-check the destination URL.
+        if resp.status_code in {301, 302, 303, 307, 308}:
+            loc = (resp.headers.get("Location") or "").strip()
+            if not loc:
+                return False, "", "request_failed"
+            current = requests.compat.urljoin(current, loc)
+            continue
+
+        try:
+            resp.raise_for_status()
+        except Exception:
+            return False, "", "request_failed"
+
+        text = extract_readable_text(resp.text)
+        break
+    else:
+        return False, "", "request_failed"
 
     if len(text) < 250:
         return False, "", "too_little_text"

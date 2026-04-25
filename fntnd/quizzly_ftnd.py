@@ -172,6 +172,9 @@ def _persist_quiz_state(
 st.set_page_config(page_title="Quizzly", page_icon="📖", layout="wide")
 
 # Initialize Session States for stateful UI
+st.session_state.setdefault("web_text", "")
+st.session_state.setdefault("_persisted_answers", {})
+st.session_state.setdefault("_last_autosave_hash", None)
 if "quiz_data" not in st.session_state:
     st.session_state.quiz_data = None
 if "error_notebook" not in st.session_state:
@@ -196,6 +199,7 @@ def main():
     client_id = _get_or_create_client_id()
     qp = _get_query_params()
     quiz_id = (qp.get("quiz") or "").strip()
+    debug_enabled = bool(st.secrets.get("DEBUG", False)) or (os.environ.get("DEBUG") == "1")
 
     # If Streamlit reset our session_state (WebSocket reconnect / idle), try to rehydrate
     # from cached/disk state using URL params.
@@ -349,6 +353,35 @@ def main():
 
             if source_mode == "Upload files":
                 st.session_state.web_text = ""
+                MAX_TOTAL_UPLOAD_BYTES = 10 * 1024 * 1024
+                total_size = 0
+                size_unknown = False
+                for uf in uploaded_files:
+                    sz = getattr(uf, "size", None)
+                    if sz is None:
+                        size_unknown = True
+                        continue
+                    total_size += int(sz)
+                if size_unknown:
+                    st.warning(
+                        "Could not determine file sizes for one or more uploads. "
+                        "If generation fails, reduce your upload sizes."
+                    )
+                elif total_size > MAX_TOTAL_UPLOAD_BYTES:
+                    st.error(
+                        "Total upload size must be ≤ 10 MB. "
+                        f"Current total: {total_size / (1024 * 1024):.2f} MB."
+                    )
+                    uploaded_files = None
+                    has_files = False
+                    processed_paths = []
+                    cleanup_paths = []
+                    source_count = 0
+                    max_questions = MIN_QUESTIONS
+                    can_generate = False
+                    generate_btn = False
+                    # Skip further file processing
+                    st.stop()
                 seen_fps = set()
                 unique_uploads = []
                 dup_notes = []
@@ -567,19 +600,21 @@ def main():
                 st.error(
                     "There was a problem communicating with OpenAI. Check your API key, billing limits, or network connection."
                 )
-                st.info(f"**Details:** {str(e)}")
+                if debug_enabled:
+                    st.info(f"**Details:** {str(e)}")
 
             except ValueError as e:
                 st.error("A configuration or input value error occurred.")
-                st.info(f"**Details:** {str(e)}")
+                if debug_enabled:
+                    st.info(f"**Details:** {str(e)}")
 
             except Exception as e:
                 error_type = type(e).__name__
                 st.error(f"The workflow failed due to an unexpected {error_type}.")
-                st.info(f"**Details:** {str(e)}")
-
-                with st.expander("🛠️ Show Detailed Stack Trace (For Debugging)"):
-                    st.code(traceback.format_exc(), language="python")
+                if debug_enabled:
+                    st.info(f"**Details:** {str(e)}")
+                    with st.expander("🛠️ Show Detailed Stack Trace (For Debugging)"):
+                        st.code(traceback.format_exc(), language="python")
             finally:
                 cleanup_list = st.session_state.get("cleanup_paths") or []
                 for p in cleanup_list:
