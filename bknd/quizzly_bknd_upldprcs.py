@@ -1,4 +1,4 @@
-"""File conversion and web text extraction for Quizzly (no Streamlit)."""
+"""File conversion and web text extraction for Quizzly (no Streamlit UI)."""
 
 import ipaddress
 import os
@@ -83,7 +83,11 @@ def _check_http_url_safety(url: str) -> tuple[bool, str]:
 
     # DNS-based block: if hostname resolves to internal IPs, block.
     try:
-        infos = socket.getaddrinfo(hostname, p.port or (443 if p.scheme == "https" else 80), type=socket.SOCK_STREAM)
+        infos = socket.getaddrinfo(
+            hostname,
+            p.port or (443 if p.scheme == "https" else 80),
+            type=socket.SOCK_STREAM,
+        )
         for info in infos:
             addr = info[4][0]
             try:
@@ -148,9 +152,9 @@ def fetch_website_text(url: str) -> tuple[bool, str, str]:
 
     if len(text) < 250:
         if url.startswith("https://"):
-            fallback_url = "https://r.jina.ai/https://" + url[len("https://"):]
+            fallback_url = "https://r.jina.ai/https://" + url[len("https://") :]
         elif url.startswith("http://"):
-            fallback_url = "https://r.jina.ai/http://" + url[len("http://"):]
+            fallback_url = "https://r.jina.ai/http://" + url[len("http://") :]
         else:
             fallback_url = "https://r.jina.ai/http://" + url
 
@@ -159,7 +163,9 @@ def fetch_website_text(url: str) -> tuple[bool, str, str]:
             return False, "", reason_fb
 
         try:
-            fb = requests.get(fallback_url, headers=headers, timeout=(10, 20), allow_redirects=True)
+            fb = requests.get(
+                fallback_url, headers=headers, timeout=(10, 20), allow_redirects=True
+            )
             fb.raise_for_status()
             text = extract_readable_text(fb.text)
         except Exception:
@@ -226,3 +232,4 @@ def image_to_pdf(input_path: str) -> str:
     image.save(output_path, "PDF")
 
     return output_path
+
