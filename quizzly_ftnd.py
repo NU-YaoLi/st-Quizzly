@@ -6,6 +6,7 @@ import traceback
 import uuid
 
 import hashlib
+import json
 
 import streamlit as st
 from openai import OpenAIError
@@ -63,6 +64,111 @@ from quizzly_config import (
 def _cached_fetch_website_text(url: str) -> tuple[bool, str, str]:
     return fetch_website_text(url)
 
+
+STATE_DIR = os.path.join(tempfile.gettempdir(), "quizzly_state")
+
+
+def _sha256_text(s: str) -> str:
+    return hashlib.sha256(s.encode("utf-8", errors="ignore")).hexdigest()
+
+
+def _get_query_params() -> dict[str, str]:
+    # streamlit >=1.30: st.query_params behaves like a mutable mapping.
+    try:
+        qp = dict(st.query_params)  # type: ignore[attr-defined]
+        # values can be list-like in some versions; normalize to str
+        return {k: (v[0] if isinstance(v, list) else str(v)) for k, v in qp.items()}
+    except Exception:
+        # streamlit <1.30 compatibility
+        try:
+            qp = st.experimental_get_query_params()
+            return {k: (v[0] if isinstance(v, list) and v else "") for k, v in qp.items()}
+        except Exception:
+            return {}
+
+
+def _set_query_params(**kwargs: str) -> None:
+    cleaned = {k: v for k, v in kwargs.items() if v}
+    try:
+        st.query_params.clear()  # type: ignore[attr-defined]
+        st.query_params.update(cleaned)  # type: ignore[attr-defined]
+    except Exception:
+        st.experimental_set_query_params(**cleaned)
+
+
+def _get_or_create_client_id() -> str:
+    qp = _get_query_params()
+    client_id = (qp.get("client") or "").strip()
+    if client_id:
+        return client_id
+    client_id = uuid.uuid4().hex
+    quiz_id = (qp.get("quiz") or "").strip()
+    _set_query_params(client=client_id, quiz=quiz_id)
+    return client_id
+
+
+def _state_path(client_id: str, quiz_id: str) -> str:
+    safe_client = "".join(ch for ch in client_id if ch.isalnum())[:64] or "client"
+    safe_quiz = "".join(ch for ch in quiz_id if ch.isalnum())[:64] or "quiz"
+    return os.path.join(STATE_DIR, f"{safe_client}_{safe_quiz}.json")
+
+
+def _load_state_from_disk(client_id: str, quiz_id: str) -> dict | None:
+    if not client_id or not quiz_id:
+        return None
+    p = _state_path(client_id, quiz_id)
+    try:
+        if not os.path.exists(p):
+            return None
+        with open(p, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _save_state_to_disk(client_id: str, quiz_id: str, payload: dict) -> None:
+    if not client_id or not quiz_id:
+        return
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        p = _state_path(client_id, quiz_id)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+    except Exception:
+        # Best-effort only; don't break the app if disk write fails.
+        pass
+
+
+@st.cache_data(ttl=24 * 60 * 60, show_spinner=False)
+def _load_state_cached(client_id: str, quiz_id: str) -> dict | None:
+    # Cache-backed "rehydration" for WebSocket reconnects.
+    return _load_state_from_disk(client_id, quiz_id)
+
+
+def _persist_quiz_state(
+    client_id: str,
+    quiz_id: str,
+    *,
+    quiz_data: dict | None,
+    verification_report: dict | None,
+    error_notebook: list[dict],
+    answers: dict[str, int | None],
+) -> None:
+    payload = {
+        "saved_at": time.time(),
+        "quiz_data": quiz_data,
+        "verification_report": verification_report,
+        "error_notebook": error_notebook,
+        "answers": answers,
+    }
+    # Disk is the source of truth for cache; cache reduces rereads after reconnect.
+    _save_state_to_disk(client_id, quiz_id, payload)
+    try:
+        _load_state_cached.clear()  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+
 st.set_page_config(page_title="Quizzly", page_icon="📖", layout="wide")
 
 # Initialize Session States for stateful UI
@@ -87,6 +193,19 @@ if "web_url_slot_count" not in st.session_state:
 
 
 def main():
+    client_id = _get_or_create_client_id()
+    qp = _get_query_params()
+    quiz_id = (qp.get("quiz") or "").strip()
+
+    # If Streamlit reset our session_state (WebSocket reconnect / idle), try to rehydrate
+    # from cached/disk state using URL params.
+    if quiz_id and st.session_state.quiz_data is None:
+        hydrated = _load_state_cached(client_id, quiz_id)
+        if hydrated:
+            st.session_state.quiz_data = hydrated.get("quiz_data")
+            st.session_state.verification_report = hydrated.get("verification_report")
+            st.session_state.error_notebook = hydrated.get("error_notebook") or []
+            st.session_state._persisted_answers = hydrated.get("answers") or {}
 
     # API Key Check via Streamlit Secrets
     if "OPENAI_API_KEY" not in st.secrets:
@@ -373,6 +492,10 @@ def main():
         if generate_btn:
             st.session_state.workflow_status_label = None
             st.session_state.workflow_status_lines = []
+            # New quiz run: assign a stable quiz_id and place it in the URL so
+            # a WebSocket reconnect can rehydrate state.
+            quiz_id = uuid.uuid4().hex
+            _set_query_params(client=client_id, quiz=quiz_id)
 
             start_time = time.time()
 
@@ -431,6 +554,17 @@ def main():
 
                     st.session_state.verification_report = report
                     st.session_state.quiz_data = quiz_data
+                    st.session_state._persisted_answers = {}
+
+                    # Persist quiz immediately (before any answers are chosen).
+                    _persist_quiz_state(
+                        client_id,
+                        quiz_id,
+                        quiz_data=st.session_state.quiz_data,
+                        verification_report=st.session_state.verification_report,
+                        error_notebook=st.session_state.error_notebook,
+                        answers={},
+                    )
 
                     elapsed_time = time.time() - start_time
                     st.session_state.generation_time = elapsed_time
@@ -525,21 +659,49 @@ def main():
             # Interactive Quiz
             with st.form("quiz_form"):
                 user_answers = {}
+                persisted_answers = st.session_state.get("_persisted_answers") or {}
                 for i, q in enumerate(st.session_state.quiz_data.get("questions", [])):
                     # Add the Difficulty badge to the question header
                     difficulty = q.get('difficulty', 'Unrated')
                     st.markdown(f"**{i+1}. {q['question_text']}** *(Difficulty: {difficulty})*")
                     
                     options = q.get("options", [])
+                    widget_key = f"q_{q['id']}"
+                    if widget_key not in st.session_state:
+                        saved_idx = persisted_answers.get(str(q["id"]))
+                        if saved_idx is not None:
+                            st.session_state[widget_key] = saved_idx
                     user_answers[q['id']] = st.radio(
                         "Select an option:",
                         options=range(len(options)),
                         format_func=lambda idx: options[idx],
-                        key=f"q_{q['id']}",
+                        key=widget_key,
                         index=None,
                     )
                     st.write("---")
                 
+                # Autosave current selections (best-effort) so a reconnect restores progress
+                # even if the user hasn't pressed "Submit Answers" yet.
+                qp_now = _get_query_params()
+                quiz_id_now = (qp_now.get("quiz") or "").strip()
+                if quiz_id_now:
+                    answers_snapshot = {
+                        str(qid): (None if idx is None else int(idx))
+                        for qid, idx in user_answers.items()
+                    }
+                    snap_hash = _sha256_text(json.dumps(answers_snapshot, sort_keys=True))
+                    if st.session_state.get("_last_autosave_hash") != snap_hash:
+                        st.session_state._last_autosave_hash = snap_hash
+                        st.session_state._persisted_answers = answers_snapshot
+                        _persist_quiz_state(
+                            client_id,
+                            quiz_id_now,
+                            quiz_data=st.session_state.quiz_data,
+                            verification_report=st.session_state.verification_report,
+                            error_notebook=st.session_state.error_notebook,
+                            answers=answers_snapshot,
+                        )
+
                 submitted = st.form_submit_button("Submit Answers")
                 
                 if submitted:
@@ -576,6 +738,22 @@ def main():
                             if error_entry not in st.session_state.error_notebook:
                                 st.session_state.error_notebook.append(error_entry)
 
+                    # Persist after submit (includes any new error notebook entries).
+                    quiz_id_now = (qp.get("quiz") or "").strip()
+                    if quiz_id_now:
+                        answers_snapshot = {
+                            str(qid): (None if idx is None else int(idx))
+                            for qid, idx in user_answers.items()
+                        }
+                        _persist_quiz_state(
+                            client_id,
+                            quiz_id_now,
+                            quiz_data=st.session_state.quiz_data,
+                            verification_report=st.session_state.verification_report,
+                            error_notebook=st.session_state.error_notebook,
+                            answers=answers_snapshot,
+                        )
+
     # --- View 2: Error Notebook Right Panel ---
     with col2:
         with st.container(
@@ -602,6 +780,19 @@ def main():
                 # Adding use_container_width=True makes the button span the panel nicely
                 if st.button("Clear Notebook", use_container_width=True):
                     st.session_state.error_notebook = []
+                    # Keep disk/cache in sync so a reconnect doesn't resurrect old errors.
+                    qp2 = _get_query_params()
+                    quiz_id_now = (qp2.get("quiz") or "").strip()
+                    if quiz_id_now and st.session_state.get("quiz_data"):
+                        persisted_answers = st.session_state.get("_persisted_answers") or {}
+                        _persist_quiz_state(
+                            client_id,
+                            quiz_id_now,
+                            quiz_data=st.session_state.quiz_data,
+                            verification_report=st.session_state.verification_report,
+                            error_notebook=[],
+                            answers=persisted_answers,
+                        )
                     st.rerun()
 
 if __name__ == "__main__":
