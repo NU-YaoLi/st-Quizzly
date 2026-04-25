@@ -598,15 +598,17 @@ def main():
                 except Exception:
                     pass
 
-        if st.session_state.workflow_status_label:
-            with st.expander(st.session_state.workflow_status_label, expanded=False):
-                lines = st.session_state.workflow_status_lines or []
+        status_label = st.session_state.get("workflow_status_label")
+        if status_label:
+            with st.expander(status_label, expanded=False):
+                lines = st.session_state.get("workflow_status_lines") or []
                 if lines:
                     st.code("\n".join(lines))
 
-        if st.session_state.quiz_data:
-            if st.session_state.verification_report:
-                report = st.session_state.verification_report
+        quiz_data = st.session_state.get("quiz_data")
+        if quiz_data:
+            report = st.session_state.get("verification_report")
+            if report:
                 with st.expander("View Comprehensive Verification Report"):
                     passed = report.get("passed_constraints", "Unknown")
                     c_score = report.get("constraint_score", 0.0)
@@ -640,12 +642,12 @@ def main():
                     st.info(reasoning)
 
             st.divider()
-            st.subheader(st.session_state.quiz_data.get("quiz_title", "Assessment"))
+            st.subheader(quiz_data.get("quiz_title", "Assessment"))
 
             with st.form("quiz_form"):
                 user_answers = {}
                 persisted_answers = st.session_state.get("_persisted_answers") or {}
-                for i, q in enumerate(st.session_state.quiz_data.get("questions", [])):
+                for i, q in enumerate(quiz_data.get("questions", [])):
                     difficulty = q.get("difficulty", "Unrated")
                     st.markdown(
                         f"**{i+1}. {q['question_text']}** *(Difficulty: {difficulty})*"
@@ -689,7 +691,7 @@ def main():
                 submitted = st.form_submit_button("Submit Answers")
 
                 if submitted:
-                    for q in st.session_state.quiz_data["questions"]:
+                    for q in quiz_data.get("questions", []):
                         user_ans = user_answers[q["id"]]
 
                         if user_ans is None:
