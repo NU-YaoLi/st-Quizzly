@@ -115,18 +115,29 @@ def main():
     # Set it as an environment variable so LangChain and OpenAI clients pick it up automatically
     os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 
-    # --- Error Notebook view (all-time history) ---
-    if view == "errors":
-        render_error_notebook_view(client_id=client_id, quiz_id=quiz_id)
-        return
-
     # --- Sidebar: Upload & Settings ---
     with st.sidebar:
-        if st.button("📒 Error Notebook", use_container_width=True):
-            set_query_params(client=client_id, quiz=quiz_id, view="errors")
-            st.rerun()
+        if view == "errors":
+            if st.button("← Back to Quiz", use_container_width=True):
+                set_query_params(client=client_id, quiz=quiz_id)
+                st.rerun()
+            st.markdown(
+                """
+                <style>
+                section[data-testid="stSidebar"] [class*="st-key-quizzly_sidebar_controls"] {
+                    display: none !important;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
+        else:
+            if st.button("📒 Error Notebook", use_container_width=True):
+                set_query_params(client=client_id, quiz=quiz_id, view="errors")
+                st.rerun()
 
-        st.header("Study Materials")
+        with st.container(key="quizzly_sidebar_controls"):
+            st.header("Study Materials")
 
         source_mode = st.radio(
             "Material source (choose one)",
@@ -245,8 +256,9 @@ def main():
         has_files = bool(uploaded_files)
         has_urls = bool(website_urls)
 
-        if (source_mode == "Upload files" and has_files) or (
-            source_mode == "Website links" and has_urls
+        if view != "errors" and (
+            (source_mode == "Upload files" and has_files)
+            or (source_mode == "Website links" and has_urls)
         ):
             temp_dir = tempfile.gettempdir()
             processed_paths: list[str] = []
@@ -406,6 +418,11 @@ def main():
 
             st.write("")
             generate_btn = st.button("Generate & Verify Quiz", type="primary", disabled=(not can_generate))
+
+    # --- Error Notebook view (all-time history) ---
+    if view == "errors":
+        render_error_notebook_view(client_id=client_id, quiz_id=quiz_id)
+        return
 
     # --- Main Area: Processing & Display ---
     st.markdown(

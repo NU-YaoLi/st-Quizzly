@@ -1,6 +1,6 @@
 import streamlit as st
 
-from fntnd.quizzly_state import load_error_history, save_error_history, set_query_params
+from fntnd.quizzly_state import load_error_history, save_error_history
 from quizzly_config import ANSWER_LETTERS
 
 
@@ -17,11 +17,6 @@ def _clean_option_text(s: str) -> str:
 
 
 def render_error_notebook_view(*, client_id: str, quiz_id: str) -> None:
-    with st.sidebar:
-        if st.button("← Back to Quiz", use_container_width=True):
-            set_query_params(client=client_id, quiz=quiz_id)
-            st.rerun()
-
     st.title("Error Notebook")
     st.caption("All-time record of mistakes across quizzes for this client session.")
 
