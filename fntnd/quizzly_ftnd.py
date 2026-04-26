@@ -238,6 +238,7 @@ def main():
     qp = _get_query_params()
     quiz_id = (qp.get("quiz") or "").strip()
     debug_enabled = bool(st.secrets.get("DEBUG", False)) or (os.environ.get("DEBUG") == "1")
+    view = (qp.get("view") or "").strip().lower()
 
     @st.dialog("Quiz score")
     def _score_dialog() -> None:
@@ -290,8 +291,9 @@ def main():
 
     # --- Sidebar: Upload & Settings ---
     with st.sidebar:
-        # Use Streamlit's native multipage navigation (more reliable than a button).
-        st.page_link("pages/error_notebook.py", label="📒 Error Notebook", use_container_width=True)
+        if st.button("📒 Error Notebook", use_container_width=True):
+            _set_query_params(client=client_id, quiz=quiz_id, view="errors")
+            st.rerun()
         st.header("Study Materials")
 
         source_mode = st.radio(
@@ -572,6 +574,67 @@ def main():
 
             st.write("")
             generate_btn = st.button("Generate & Verify Quiz", type="primary", disabled=(not can_generate))
+
+    # --- Alternate view: Error Notebook (all-time history) ---
+    if view == "errors":
+        st.title("Error Notebook")
+        st.caption("All-time record of mistakes across quizzes for this client session.")
+
+        history = st.session_state.get("error_notebook_history") or _load_error_history(client_id)
+        st.session_state["error_notebook_history"] = history
+
+        col_a, col_b = st.columns([1, 1], gap="small")
+        with col_a:
+            st.metric("Total mistakes saved", len(history))
+        with col_b:
+            if st.button("Back to Quiz", use_container_width=True):
+                _set_query_params(client=client_id, quiz=quiz_id)
+                st.rerun()
+
+        st.divider()
+        if not history:
+            st.info("No mistakes saved yet.")
+        else:
+            for idx, error in enumerate(reversed(history)):
+                q_text = error.get("question") or "Question"
+                with st.expander(f"{len(history) - idx}. {q_text[:80]}"):
+                    st.markdown(f"**Q:** {q_text}")
+
+                    options = error.get("options") or []
+                    if options:
+                        st.markdown("**Options:**")
+                        for i, opt in enumerate(options):
+                            letter = ANSWER_LETTERS[i] if i < len(ANSWER_LETTERS) else str(i)
+                            st.markdown(f"- **{letter})** {opt}")
+
+                    user_letter = error.get("user_answer_letter")
+                    user_text = error.get("user_answer_text")
+                    if user_letter is not None:
+                        if user_text:
+                            st.markdown(f"❌ **Your answer:** {user_letter}) {user_text}")
+                        else:
+                            st.markdown(f"❌ **Your answer:** {user_letter}")
+
+                    correct_letter = error.get("correct_option")
+                    correct_text = error.get("correct_answer_text")
+                    if correct_letter is not None:
+                        if correct_text:
+                            st.markdown(f"✅ **Correct answer:** {correct_letter}) {correct_text}")
+                        else:
+                            st.markdown(f"✅ **Correct answer:** {correct_letter}")
+
+                    expl = error.get("explanation")
+                    if expl:
+                        st.markdown(f"💡 **Explanation:**\n\n{expl}")
+
+            st.divider()
+            if st.button("Clear ALL history", type="secondary", use_container_width=True):
+                _save_error_history(client_id, [])
+                st.session_state["error_notebook_history"] = []
+                st.success("History cleared.")
+                st.rerun()
+
+        return
 
     # --- Main Area: Processing & Display ---
     st.markdown(
