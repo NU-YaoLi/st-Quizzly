@@ -216,21 +216,21 @@ st.session_state.setdefault("error_notebook", [])
 st.session_state.setdefault("error_notebook_current", [])
 st.session_state.setdefault("error_notebook_history", [])
 if "quiz_data" not in st.session_state:
-    st.session_state.quiz_data = None
+    st.session_state["quiz_data"] = None
 if "verification_report" not in st.session_state:
-    st.session_state.verification_report = None
+    st.session_state["verification_report"] = None
 if "generation_time" not in st.session_state:
-    st.session_state.generation_time = None
+    st.session_state["generation_time"] = None
 if "current_paths" not in st.session_state:
-    st.session_state.current_paths = []
+    st.session_state["current_paths"] = []
 if "cleanup_paths" not in st.session_state:
-    st.session_state.cleanup_paths = []
+    st.session_state["cleanup_paths"] = []
 if "workflow_status_label" not in st.session_state:
-    st.session_state.workflow_status_label = None
+    st.session_state["workflow_status_label"] = None
 if "workflow_status_lines" not in st.session_state:
-    st.session_state.workflow_status_lines = []
+    st.session_state["workflow_status_lines"] = []
 if "web_url_slot_count" not in st.session_state:
-    st.session_state.web_url_slot_count = 1
+    st.session_state["web_url_slot_count"] = 1
 
 
 def main():
@@ -263,22 +263,22 @@ def main():
             f"Score: **{(0 if total == 0 else (correct / total) * 100):.0f}%**"
         )
         if st.button("Close", use_container_width=True):
-            st.session_state._show_score_dialog = False
+            st.session_state["_show_score_dialog"] = False
             st.rerun()
 
     # If Streamlit reset our session_state (WebSocket reconnect / idle), try to rehydrate
     # from cached/disk state using URL params.
-    if quiz_id and st.session_state.quiz_data is None:
+    if quiz_id and st.session_state.get("quiz_data") is None:
         hydrated = _load_state_cached(client_id, quiz_id)
         if hydrated:
-            st.session_state.quiz_data = hydrated.get("quiz_data")
-            st.session_state.verification_report = hydrated.get("verification_report")
-            st.session_state.error_notebook_current = hydrated.get("error_notebook") or []
-            st.session_state._persisted_answers = hydrated.get("answers") or {}
+            st.session_state["quiz_data"] = hydrated.get("quiz_data")
+            st.session_state["verification_report"] = hydrated.get("verification_report")
+            st.session_state["error_notebook_current"] = hydrated.get("error_notebook") or []
+            st.session_state["_persisted_answers"] = hydrated.get("answers") or {}
 
     # Load all-time error notebook history once per session/client.
     if not (st.session_state.get("error_notebook_history") or []):
-        st.session_state.error_notebook_history = _load_error_history(client_id)
+        st.session_state["error_notebook_history"] = _load_error_history(client_id)
 
     # API Key Check via Streamlit Secrets
     if "OPENAI_API_KEY" not in st.secrets:
@@ -309,7 +309,7 @@ def main():
         files_mode = source_mode == "Upload files"
         if files_mode:
             # Prevent stale website text from influencing file-only runs.
-            st.session_state.web_text = ""
+            st.session_state["web_text"] = ""
 
         # Always mount the uploader (stable key) so switching source mode does not drop uploads.
         uploaded_files = st.file_uploader(
@@ -360,7 +360,7 @@ def main():
                 "Search-result pages often fail; prefer article URLs."
             )
             apply_pending_web_url_removal()
-            n_slots = min(int(st.session_state.web_url_slot_count), MAX_WEB_URL_SLOTS)
+            n_slots = min(int(st.session_state.get("web_url_slot_count", 1)), MAX_WEB_URL_SLOTS)
             st.caption("Website URLs")
             for i in range(n_slots):
                 col_url, col_x = st.columns([1, 0.14], gap="small", vertical_alignment="center")
@@ -407,7 +407,7 @@ def main():
                 disabled=(n_slots >= MAX_WEB_URL_SLOTS),
                 help="Add another URL field",
             ):
-                st.session_state.web_url_slot_count = min(n_slots + 1, MAX_WEB_URL_SLOTS)
+                st.session_state["web_url_slot_count"] = min(n_slots + 1, MAX_WEB_URL_SLOTS)
                 st.rerun()
 
         num_questions = MIN_QUESTIONS
@@ -428,7 +428,7 @@ def main():
             source_count = 0
 
             if source_mode == "Upload files":
-                st.session_state.web_text = ""
+                st.session_state["web_text"] = ""
                 MAX_TOTAL_UPLOAD_BYTES = 10 * 1024 * 1024
                 total_size = 0
                 size_unknown = False
@@ -506,7 +506,7 @@ def main():
                 )
 
             else:
-                st.session_state.current_paths = []
+                st.session_state["current_paths"] = []
                 for url in website_urls:
                     try:
                         ok, chunk, reason = _cached_fetch_website_text(url)
@@ -534,15 +534,15 @@ def main():
                     total_web_pages = 0
 
                 combined_web = "\n\n---\n\n".join(f"Source: {u}\n\n{t}" for u, t in web_blocks)
-                st.session_state.web_text = combined_web
+                st.session_state["web_text"] = combined_web
 
                 max_questions = max(
                     MIN_QUESTIONS,
                     min(MAX_QUESTIONS_CAP, total_web_pages // 2, source_count * MAX_QUESTIONS_PER_SOURCE),
                 )
 
-            st.session_state.current_paths = processed_paths
-            st.session_state.cleanup_paths = cleanup_paths
+            st.session_state["current_paths"] = processed_paths
+            st.session_state["cleanup_paths"] = cleanup_paths
 
             if source_count == 0:
                 st.warning("Materials loaded: 0 sources — check your URLs or switch to file upload.")
@@ -643,7 +643,7 @@ def main():
 
                 st.divider()
                 if st.button("Clear Notebook", use_container_width=True):
-                    st.session_state.error_notebook_current = []
+                    st.session_state["error_notebook_current"] = []
                     qp2 = _get_query_params()
                     quiz_id_now = (qp2.get("quiz") or "").strip()
                     if quiz_id_now and st.session_state.get("quiz_data"):
@@ -651,8 +651,8 @@ def main():
                         _persist_quiz_state(
                             client_id,
                             quiz_id_now,
-                            quiz_data=st.session_state.quiz_data,
-                            verification_report=st.session_state.verification_report,
+                            quiz_data=st.session_state.get("quiz_data"),
+                            verification_report=st.session_state.get("verification_report"),
                             error_notebook=[],
                             answers=persisted_answers,
                         )
@@ -665,15 +665,15 @@ def main():
         )
 
         if generate_btn:
-            st.session_state.workflow_status_label = None
-            st.session_state.workflow_status_lines = []
+            st.session_state["workflow_status_label"] = None
+            st.session_state["workflow_status_lines"] = []
             quiz_id = uuid.uuid4().hex
             _set_query_params(client=client_id, quiz=quiz_id)
 
             start_time = time.time()
 
             def log_line(s: str):
-                st.session_state.workflow_status_lines.append(s)
+                st.session_state["workflow_status_lines"].append(s)
 
             client = None
             oai_file_ids: list[str] = []
@@ -682,7 +682,7 @@ def main():
                     client = setup_api()
 
                     log_line("Uploading to secure environment...")
-                    for fp in st.session_state.current_paths:
+                    for fp in st.session_state.get("current_paths") or []:
                         mime_type, _ = mimetypes.guess_type(fp)
                         if mime_type is None:
                             mime_type = "application/octet-stream"
@@ -731,25 +731,25 @@ def main():
                     log_line("Running quiz verification checks...")
                     report = verify_quiz(concepts, quiz_data, num_questions)
 
-                    st.session_state.verification_report = report
-                    st.session_state.quiz_data = quiz_data
-                    st.session_state._persisted_answers = {}
-                    st.session_state._quiz_submitted = False
-                    st.session_state._last_graded_hash = None
-                    st.session_state.error_notebook_current = []
+                    st.session_state["verification_report"] = report
+                    st.session_state["quiz_data"] = quiz_data
+                    st.session_state["_persisted_answers"] = {}
+                    st.session_state["_quiz_submitted"] = False
+                    st.session_state["_last_graded_hash"] = None
+                    st.session_state["error_notebook_current"] = []
 
                     _persist_quiz_state(
                         client_id,
                         quiz_id,
-                        quiz_data=st.session_state.quiz_data,
-                        verification_report=st.session_state.verification_report,
+                        quiz_data=st.session_state.get("quiz_data"),
+                        verification_report=st.session_state.get("verification_report"),
                         error_notebook=st.session_state.get("error_notebook_current") or [],
                         answers={},
                     )
 
                     elapsed_time = time.time() - start_time
-                    st.session_state.generation_time = elapsed_time
-                    st.session_state.workflow_status_label = f"Workflow complete in {elapsed_time:.1f} secs"
+                    st.session_state["generation_time"] = elapsed_time
+                    st.session_state["workflow_status_label"] = f"Workflow complete in {elapsed_time:.1f} secs"
                 st.rerun()
 
             except OpenAIError as e:
@@ -779,7 +779,7 @@ def main():
                             os.remove(p)
                     except Exception:
                         pass
-                st.session_state.cleanup_paths = []
+                st.session_state["cleanup_paths"] = []
                 try:
                     for fid in oai_file_ids:
                         try:
@@ -891,13 +891,13 @@ def main():
                     }
                     snap_hash = _sha256_text(json.dumps(answers_snapshot, sort_keys=True))
                     if st.session_state.get("_last_autosave_hash") != snap_hash:
-                        st.session_state._last_autosave_hash = snap_hash
-                        st.session_state._persisted_answers = answers_snapshot
+                        st.session_state["_last_autosave_hash"] = snap_hash
+                        st.session_state["_persisted_answers"] = answers_snapshot
                         _persist_quiz_state(
                             client_id,
                             quiz_id_now,
-                            quiz_data=st.session_state.quiz_data,
-                            verification_report=st.session_state.verification_report,
+                            quiz_data=st.session_state.get("quiz_data"),
+                            verification_report=st.session_state.get("verification_report"),
                             error_notebook=st.session_state.get("error_notebook_current") or [],
                             answers=answers_snapshot,
                         )
@@ -913,7 +913,7 @@ def main():
                         }
                         grade_hash = _sha256_text(json.dumps(answers_snapshot, sort_keys=True))
                         if st.session_state.get("_last_graded_hash") != grade_hash:
-                            st.session_state._last_graded_hash = grade_hash
+                            st.session_state["_last_graded_hash"] = grade_hash
                             correct_count = 0
                             total_count = len(quiz_data.get("questions", []))
                             for q in quiz_data.get("questions", []):
@@ -956,22 +956,22 @@ def main():
                                     cur = st.session_state.get("error_notebook_current") or []
                                     if error_entry not in cur:
                                         cur.append(error_entry)
-                                        st.session_state.error_notebook_current = cur
+                                        st.session_state["error_notebook_current"] = cur
 
                                     hist = st.session_state.get("error_notebook_history") or []
                                     if error_entry not in hist:
                                         hist.append(error_entry)
-                                        st.session_state.error_notebook_history = hist
+                                        st.session_state["error_notebook_history"] = hist
                                         _save_error_history(client_id, hist)
-                            st.session_state._last_score = (correct_count, total_count)
-                            st.session_state._show_score_dialog = True
+                            st.session_state["_last_score"] = (correct_count, total_count)
+                            st.session_state["_show_score_dialog"] = True
 
-                        st.session_state._quiz_submitted = True
+                        st.session_state["_quiz_submitted"] = True
                         _persist_quiz_state(
                             client_id,
                             quiz_id_now,
-                            quiz_data=st.session_state.quiz_data,
-                            verification_report=st.session_state.verification_report,
+                            quiz_data=st.session_state.get("quiz_data"),
+                            verification_report=st.session_state.get("verification_report"),
                             error_notebook=st.session_state.get("error_notebook_current") or [],
                             answers=answers_snapshot,
                         )
