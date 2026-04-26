@@ -5,6 +5,7 @@ import tempfile
 import time
 import traceback
 import uuid
+import hashlib
 
 import streamlit as st
 from openai import OpenAIError
