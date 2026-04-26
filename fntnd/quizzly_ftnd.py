@@ -1,8 +1,6 @@
-import hashlib
 import json
 import mimetypes
 import os
-import tempfile
 import time
 import traceback
 import uuid
@@ -59,183 +57,34 @@ from quizzly_config import (
     WEB_FETCH_CACHE_TTL_SECS,
 )
 
+from fntnd.quizzly_state import (
+    get_or_create_client_id,
+    get_query_params,
+    init_session_state,
+    load_error_history,
+    load_state_cached,
+    persist_quiz_state,
+    save_error_history,
+    set_query_params,
+    sha256_text,
+)
+from fntnd.views.quizzly_current_quiz_mistakes import render_current_quiz_mistakes
+from fntnd.views.quizzly_error_notebook_view import render_error_notebook_view
+
 
 @st.cache_data(ttl=WEB_FETCH_CACHE_TTL_SECS, show_spinner=False)
 def _cached_fetch_website_text(url: str) -> tuple[bool, str, str]:
     return fetch_website_text(url)
 
 
-STATE_DIR = os.path.join(tempfile.gettempdir(), "quizzly_state")
-
-
-def _sha256_text(s: str) -> str:
-    return hashlib.sha256(s.encode("utf-8", errors="ignore")).hexdigest()
-
-
-def _get_query_params() -> dict[str, str]:
-    # streamlit >=1.30: st.query_params behaves like a mutable mapping.
-    try:
-        qp = dict(st.query_params)  # type: ignore[attr-defined]
-        # values can be list-like in some versions; normalize to str
-        return {k: (v[0] if isinstance(v, list) else str(v)) for k, v in qp.items()}
-    except Exception:
-        # streamlit <1.30 compatibility
-        try:
-            qp = st.experimental_get_query_params()
-            return {k: (v[0] if isinstance(v, list) and v else "") for k, v in qp.items()}
-        except Exception:
-            return {}
-
-
-def _set_query_params(**kwargs: str) -> None:
-    cleaned = {k: v for k, v in kwargs.items() if v}
-    try:
-        st.query_params.clear()  # type: ignore[attr-defined]
-        st.query_params.update(cleaned)  # type: ignore[attr-defined]
-    except Exception:
-        st.experimental_set_query_params(**cleaned)
-
-
-def _get_or_create_client_id() -> str:
-    qp = _get_query_params()
-    client_id = (qp.get("client") or "").strip()
-    if client_id:
-        return client_id
-    client_id = uuid.uuid4().hex
-    quiz_id = (qp.get("quiz") or "").strip()
-    _set_query_params(client=client_id, quiz=quiz_id)
-    return client_id
-
-
-def _state_path(client_id: str, quiz_id: str) -> str:
-    safe_client = "".join(ch for ch in client_id if ch.isalnum())[:64] or "client"
-    safe_quiz = "".join(ch for ch in quiz_id if ch.isalnum())[:64] or "quiz"
-    return os.path.join(STATE_DIR, f"{safe_client}_{safe_quiz}.json")
-
-
-def _history_state_path(client_id: str) -> str:
-    safe_client = "".join(ch for ch in client_id if ch.isalnum())[:64] or "client"
-    return os.path.join(STATE_DIR, f"{safe_client}__error_history.json")
-
-
-def _load_error_history(client_id: str) -> list[dict]:
-    if not client_id:
-        return []
-    p = _history_state_path(client_id)
-    try:
-        if not os.path.exists(p):
-            return []
-        with open(p, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, list):
-            return [x for x in data if isinstance(x, dict)]
-        return []
-    except Exception:
-        return []
-
-
-def _save_error_history(client_id: str, history: list[dict]) -> None:
-    if not client_id:
-        return
-    try:
-        os.makedirs(STATE_DIR, exist_ok=True)
-        p = _history_state_path(client_id)
-        with open(p, "w", encoding="utf-8") as f:
-            json.dump(history, f)
-    except Exception:
-        pass
-
-
-def _load_state_from_disk(client_id: str, quiz_id: str) -> dict | None:
-    if not client_id or not quiz_id:
-        return None
-    p = _state_path(client_id, quiz_id)
-    try:
-        if not os.path.exists(p):
-            return None
-        with open(p, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
-
-
-def _save_state_to_disk(client_id: str, quiz_id: str, payload: dict) -> None:
-    if not client_id or not quiz_id:
-        return
-    try:
-        os.makedirs(STATE_DIR, exist_ok=True)
-        p = _state_path(client_id, quiz_id)
-        with open(p, "w", encoding="utf-8") as f:
-            json.dump(payload, f)
-    except Exception:
-        # Best-effort only; don't break the app if disk write fails.
-        pass
-
-
-@st.cache_data(ttl=24 * 60 * 60, show_spinner=False)
-def _load_state_cached(client_id: str, quiz_id: str) -> dict | None:
-    # Cache-backed "rehydration" for WebSocket reconnects.
-    return _load_state_from_disk(client_id, quiz_id)
-
-
-def _persist_quiz_state(
-    client_id: str,
-    quiz_id: str,
-    *,
-    quiz_data: dict | None,
-    verification_report: dict | None,
-    error_notebook: list[dict],
-    answers: dict[str, int | None],
-) -> None:
-    payload = {
-        "saved_at": time.time(),
-        "quiz_data": quiz_data,
-        "verification_report": verification_report,
-        "error_notebook": error_notebook,
-        "answers": answers,
-    }
-    # Disk is the source of truth for cache; cache reduces rereads after reconnect.
-    _save_state_to_disk(client_id, quiz_id, payload)
-    try:
-        _load_state_cached.clear()  # type: ignore[attr-defined]
-    except Exception:
-        pass
-
-
 st.set_page_config(page_title="Quizzly", page_icon="📖", layout="wide")
 
-# Initialize Session States for stateful UI
-st.session_state.setdefault("web_text", "")
-st.session_state.setdefault("_persisted_answers", {})
-st.session_state.setdefault("_last_autosave_hash", None)
-st.session_state.setdefault("_quiz_submitted", False)
-st.session_state.setdefault("_last_graded_hash", None)
-st.session_state.setdefault("_show_score_dialog", False)
-st.session_state.setdefault("_last_score", None)  # tuple[int, int] -> (correct, total)
-st.session_state.setdefault("error_notebook", [])
-st.session_state.setdefault("error_notebook_current", [])
-st.session_state.setdefault("error_notebook_history", [])
-if "quiz_data" not in st.session_state:
-    st.session_state["quiz_data"] = None
-if "verification_report" not in st.session_state:
-    st.session_state["verification_report"] = None
-if "generation_time" not in st.session_state:
-    st.session_state["generation_time"] = None
-if "current_paths" not in st.session_state:
-    st.session_state["current_paths"] = []
-if "cleanup_paths" not in st.session_state:
-    st.session_state["cleanup_paths"] = []
-if "workflow_status_label" not in st.session_state:
-    st.session_state["workflow_status_label"] = None
-if "workflow_status_lines" not in st.session_state:
-    st.session_state["workflow_status_lines"] = []
-if "web_url_slot_count" not in st.session_state:
-    st.session_state["web_url_slot_count"] = 1
+init_session_state()
 
 
 def main():
-    client_id = _get_or_create_client_id()
-    qp = _get_query_params()
+    client_id = get_or_create_client_id()
+    qp = get_query_params()
     quiz_id = (qp.get("quiz") or "").strip()
     debug_enabled = bool(st.secrets.get("DEBUG", False)) or (os.environ.get("DEBUG") == "1")
     view = (qp.get("view") or "").strip().lower()
@@ -270,16 +119,16 @@ def main():
     # If Streamlit reset our session_state (WebSocket reconnect / idle), try to rehydrate
     # from cached/disk state using URL params.
     if quiz_id and st.session_state.get("quiz_data") is None:
-        hydrated = _load_state_cached(client_id, quiz_id)
+        hydrated = load_state_cached(client_id, quiz_id)
         if hydrated:
             st.session_state["quiz_data"] = hydrated.get("quiz_data")
             st.session_state["verification_report"] = hydrated.get("verification_report")
-            st.session_state["error_notebook_current"] = hydrated.get("error_notebook") or []
+            st.session_state["_error_notebook_current"] = hydrated.get("error_notebook") or []
             st.session_state["_persisted_answers"] = hydrated.get("answers") or {}
 
     # Load all-time error notebook history once per session/client.
-    if not (st.session_state.get("error_notebook_history") or []):
-        st.session_state["error_notebook_history"] = _load_error_history(client_id)
+    if not (st.session_state.get("_error_notebook_history") or []):
+        st.session_state["_error_notebook_history"] = load_error_history(client_id)
 
     # API Key Check via Streamlit Secrets
     if "OPENAI_API_KEY" not in st.secrets:
@@ -289,11 +138,17 @@ def main():
     # Set it as an environment variable so LangChain and OpenAI clients pick it up automatically
     os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 
+    # --- Error Notebook view (all-time history) ---
+    if view == "errors":
+        render_error_notebook_view(client_id=client_id, quiz_id=quiz_id)
+        return
+
     # --- Sidebar: Upload & Settings ---
     with st.sidebar:
         if st.button("📒 Error Notebook", use_container_width=True):
-            _set_query_params(client=client_id, quiz=quiz_id, view="errors")
+            set_query_params(client=client_id, quiz=quiz_id, view="errors")
             st.rerun()
+
         st.header("Study Materials")
 
         source_mode = st.radio(
@@ -306,7 +161,7 @@ def main():
         files_mode = source_mode == "Upload files"
         if files_mode:
             # Prevent stale website text from influencing file-only runs.
-            st.session_state["web_text"] = ""
+            st.session_state["_web_text"] = ""
 
         # Always mount the uploader (stable key) so switching source mode does not drop uploads.
         uploaded_files = st.file_uploader(
@@ -425,7 +280,7 @@ def main():
             source_count = 0
 
             if source_mode == "Upload files":
-                st.session_state["web_text"] = ""
+                st.session_state["_web_text"] = ""
                 MAX_TOTAL_UPLOAD_BYTES = 10 * 1024 * 1024
                 total_size = 0
                 size_unknown = False
@@ -531,7 +386,7 @@ def main():
                     total_web_pages = 0
 
                 combined_web = "\n\n---\n\n".join(f"Source: {u}\n\n{t}" for u, t in web_blocks)
-                st.session_state["web_text"] = combined_web
+                st.session_state["_web_text"] = combined_web
 
                 max_questions = max(
                     MIN_QUESTIONS,
@@ -575,67 +430,6 @@ def main():
             st.write("")
             generate_btn = st.button("Generate & Verify Quiz", type="primary", disabled=(not can_generate))
 
-    # --- Alternate view: Error Notebook (all-time history) ---
-    if view == "errors":
-        st.title("Error Notebook")
-        st.caption("All-time record of mistakes across quizzes for this client session.")
-
-        history = st.session_state.get("error_notebook_history") or _load_error_history(client_id)
-        st.session_state["error_notebook_history"] = history
-
-        col_a, col_b = st.columns([1, 1], gap="small")
-        with col_a:
-            st.metric("Total mistakes saved", len(history))
-        with col_b:
-            if st.button("Back to Quiz", use_container_width=True):
-                _set_query_params(client=client_id, quiz=quiz_id)
-                st.rerun()
-
-        st.divider()
-        if not history:
-            st.info("No mistakes saved yet.")
-        else:
-            for idx, error in enumerate(reversed(history)):
-                q_text = error.get("question") or "Question"
-                with st.expander(f"{len(history) - idx}. {q_text[:80]}"):
-                    st.markdown(f"**Q:** {q_text}")
-
-                    options = error.get("options") or []
-                    if options:
-                        st.markdown("**Options:**")
-                        for i, opt in enumerate(options):
-                            letter = ANSWER_LETTERS[i] if i < len(ANSWER_LETTERS) else str(i)
-                            st.markdown(f"- **{letter})** {opt}")
-
-                    user_letter = error.get("user_answer_letter")
-                    user_text = error.get("user_answer_text")
-                    if user_letter is not None:
-                        if user_text:
-                            st.markdown(f"❌ **Your answer:** {user_letter}) {user_text}")
-                        else:
-                            st.markdown(f"❌ **Your answer:** {user_letter}")
-
-                    correct_letter = error.get("correct_option")
-                    correct_text = error.get("correct_answer_text")
-                    if correct_letter is not None:
-                        if correct_text:
-                            st.markdown(f"✅ **Correct answer:** {correct_letter}) {correct_text}")
-                        else:
-                            st.markdown(f"✅ **Correct answer:** {correct_letter}")
-
-                    expl = error.get("explanation")
-                    if expl:
-                        st.markdown(f"💡 **Explanation:**\n\n{expl}")
-
-            st.divider()
-            if st.button("Clear ALL history", type="secondary", use_container_width=True):
-                _save_error_history(client_id, [])
-                st.session_state["error_notebook_history"] = []
-                st.success("History cleared.")
-                st.rerun()
-
-        return
-
     # --- Main Area: Processing & Display ---
     st.markdown(
         """
@@ -662,7 +456,7 @@ def main():
             st.session_state["workflow_status_label"] = None
             st.session_state["workflow_status_lines"] = []
             quiz_id = uuid.uuid4().hex
-            _set_query_params(client=client_id, quiz=quiz_id)
+            set_query_params(client=client_id, quiz=quiz_id)
 
             start_time = time.time()
 
@@ -692,7 +486,7 @@ def main():
                                 continue
 
                         oai_file_ids.append(oai_file.id)
-                    if not oai_file_ids and not st.session_state.get("web_text", ""):
+                    if not oai_file_ids and not st.session_state.get("_web_text", ""):
                         raise ValueError("No materials were uploaded successfully.")
 
                     log_line("Extracting core concepts...")
@@ -700,7 +494,7 @@ def main():
                     concepts_resp = extractor.invoke(
                         {
                             "file_ids": oai_file_ids,
-                            "web_context": st.session_state.get("web_text", ""),
+                            "web_context": st.session_state.get("_web_text", ""),
                         }
                     )
                     concepts = concepts_resp.get("concepts") or []
@@ -715,7 +509,7 @@ def main():
                         {
                             "file_ids": oai_file_ids,
                             "concepts_list": ", ".join(concepts),
-                            "web_context": st.session_state.get("web_text", ""),
+                            "web_context": st.session_state.get("_web_text", ""),
                         }
                     )
                     log_line("Running output safety guard...")
@@ -730,14 +524,14 @@ def main():
                     st.session_state["_persisted_answers"] = {}
                     st.session_state["_quiz_submitted"] = False
                     st.session_state["_last_graded_hash"] = None
-                    st.session_state["error_notebook_current"] = []
+                    st.session_state["_error_notebook_current"] = []
 
-                    _persist_quiz_state(
+                    persist_quiz_state(
                         client_id,
                         quiz_id,
                         quiz_data=st.session_state.get("quiz_data"),
                         verification_report=st.session_state.get("verification_report"),
-                        error_notebook=st.session_state.get("error_notebook_current") or [],
+                        error_notebook=st.session_state.get("_error_notebook_current") or [],
                         answers={},
                     )
 
@@ -876,23 +670,23 @@ def main():
                                     st.info(formatted_explanation)
                     st.write("---")
 
-                qp_now = _get_query_params()
+                qp_now = get_query_params()
                 quiz_id_now = (qp_now.get("quiz") or "").strip()
                 if quiz_id_now:
                     answers_snapshot = {
                         str(qid): (None if idx is None else int(idx))
                         for qid, idx in user_answers.items()
                     }
-                    snap_hash = _sha256_text(json.dumps(answers_snapshot, sort_keys=True))
+                    snap_hash = sha256_text(json.dumps(answers_snapshot, sort_keys=True))
                     if st.session_state.get("_last_autosave_hash") != snap_hash:
                         st.session_state["_last_autosave_hash"] = snap_hash
                         st.session_state["_persisted_answers"] = answers_snapshot
-                        _persist_quiz_state(
+                        persist_quiz_state(
                             client_id,
                             quiz_id_now,
                             quiz_data=st.session_state.get("quiz_data"),
                             verification_report=st.session_state.get("verification_report"),
-                            error_notebook=st.session_state.get("error_notebook_current") or [],
+                            error_notebook=st.session_state.get("_error_notebook_current") or [],
                             answers=answers_snapshot,
                         )
 
@@ -905,7 +699,7 @@ def main():
                             str(qid): (None if idx is None else int(idx))
                             for qid, idx in user_answers.items()
                         }
-                        grade_hash = _sha256_text(json.dumps(answers_snapshot, sort_keys=True))
+                        grade_hash = sha256_text(json.dumps(answers_snapshot, sort_keys=True))
                         if st.session_state.get("_last_graded_hash") != grade_hash:
                             st.session_state["_last_graded_hash"] = grade_hash
                             correct_count = 0
@@ -947,26 +741,26 @@ def main():
                                         "correct_answer_text": correct_text,
                                         "explanation": formatted_explanation,
                                     }
-                                    cur = st.session_state.get("error_notebook_current") or []
+                                    cur = st.session_state.get("_error_notebook_current") or []
                                     if error_entry not in cur:
                                         cur.append(error_entry)
-                                        st.session_state["error_notebook_current"] = cur
+                                        st.session_state["_error_notebook_current"] = cur
 
-                                    hist = st.session_state.get("error_notebook_history") or []
+                                    hist = st.session_state.get("_error_notebook_history") or []
                                     if error_entry not in hist:
                                         hist.append(error_entry)
-                                        st.session_state["error_notebook_history"] = hist
-                                        _save_error_history(client_id, hist)
+                                        st.session_state["_error_notebook_history"] = hist
+                                        save_error_history(client_id, hist)
                             st.session_state["_last_score"] = (correct_count, total_count)
                             st.session_state["_show_score_dialog"] = True
 
                         st.session_state["_quiz_submitted"] = True
-                        _persist_quiz_state(
+                        persist_quiz_state(
                             client_id,
                             quiz_id_now,
                             quiz_data=st.session_state.get("quiz_data"),
                             verification_report=st.session_state.get("verification_report"),
-                            error_notebook=st.session_state.get("error_notebook_current") or [],
+                            error_notebook=st.session_state.get("_error_notebook_current") or [],
                             answers=answers_snapshot,
                         )
                     st.rerun()
@@ -975,68 +769,18 @@ def main():
                 _score_dialog()
 
     with col2:
-        with st.container(
-            border=True,
-            height="stretch",
-            width="stretch",
-            key="quizzly_error_notebook",
-        ):
-            st.header("Error Notebook")
-            st.markdown("Review your mistakes to reinforce learning.")
-            st.divider()
-
-            notebook = st.session_state.get("error_notebook_current") or []
-            if not notebook:
-                st.info("No errors logged yet. Great job!")
-            else:
-                for idx, error in enumerate(notebook):
-                    with st.expander(f"Review Question {idx + 1}"):
-                        q_text = error.get("question") or "Question"
-                        st.markdown(f"**Q:** {q_text}")
-
-                        options = error.get("options") or []
-                        if options:
-                            st.markdown("**Options:**")
-                            for i, opt in enumerate(options):
-                                letter = ANSWER_LETTERS[i] if i < len(ANSWER_LETTERS) else str(i)
-                                st.markdown(f"- **{letter})** {opt}")
-
-                        user_letter = error.get("user_answer_letter")
-                        user_text = error.get("user_answer_text")
-                        if user_letter is not None:
-                            if user_text:
-                                st.markdown(f"❌ **Your answer:** {user_letter}) {user_text}")
-                            else:
-                                st.markdown(f"❌ **Your answer:** {user_letter}")
-
-                        correct_letter = error.get("correct_option")
-                        correct_text = error.get("correct_answer_text")
-                        if correct_letter is not None:
-                            if correct_text:
-                                st.markdown(f"✅ **Correct answer:** {correct_letter}) {correct_text}")
-                            else:
-                                st.markdown(f"✅ **Correct answer:** {correct_letter}")
-
-                        expl = error.get("explanation")
-                        if expl:
-                            st.markdown(f"💡 **Explanation:**\n\n{expl}")
-
-                st.divider()
-                if st.button("Clear Notebook", use_container_width=True):
-                    st.session_state["error_notebook_current"] = []
-                    qp2 = _get_query_params()
-                    quiz_id_now = (qp2.get("quiz") or "").strip()
-                    if quiz_id_now and st.session_state.get("quiz_data"):
-                        persisted_answers = st.session_state.get("_persisted_answers") or {}
-                        _persist_quiz_state(
-                            client_id,
-                            quiz_id_now,
-                            quiz_data=st.session_state.get("quiz_data"),
-                            verification_report=st.session_state.get("verification_report"),
-                            error_notebook=[],
-                            answers=persisted_answers,
-                        )
-                    st.rerun()
+        render_current_quiz_mistakes(
+            client_id=client_id,
+            quiz_id=(qp.get("quiz") or "").strip(),
+            persist_cb=lambda **kwargs: persist_quiz_state(
+                client_id=kwargs["client_id"],
+                quiz_id=kwargs["quiz_id"],
+                quiz_data=st.session_state.get("quiz_data"),
+                verification_report=st.session_state.get("verification_report"),
+                error_notebook=kwargs["error_notebook_current"],
+                answers=kwargs["answers"],
+            ),
+        )
 
 if __name__ == "__main__":
     main()
