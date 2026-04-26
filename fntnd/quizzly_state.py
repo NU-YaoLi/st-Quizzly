@@ -113,7 +113,6 @@ def save_state_to_disk(client_id: str, quiz_id: str, payload: dict) -> None:
         pass
 
 
-@st.cache_data(ttl=24 * 60 * 60, show_spinner=False)
 def load_state_cached(client_id: str, quiz_id: str) -> dict | None:
     return load_state_from_disk(client_id, quiz_id)
 
@@ -151,6 +150,7 @@ def init_session_state() -> None:
     st.session_state.setdefault("_last_score", None)
     st.session_state.setdefault("_error_notebook_current", [])
     st.session_state.setdefault("_error_notebook_history", [])
+    st.session_state.setdefault("_error_history_loaded", False)
 
     st.session_state.setdefault("quiz_data", None)
     st.session_state.setdefault("verification_report", None)

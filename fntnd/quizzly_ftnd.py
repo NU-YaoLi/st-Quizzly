@@ -72,14 +72,14 @@ from fntnd.views.quizzly_current_quiz_mistakes import render_current_quiz_mistak
 from fntnd.views.quizzly_error_notebook_view import render_error_notebook_view
 
 
-@st.cache_data(ttl=WEB_FETCH_CACHE_TTL_SECS, show_spinner=False)
-def _cached_fetch_website_text(url: str) -> tuple[bool, str, str]:
-    return fetch_website_text(url)
-
-
 st.set_page_config(page_title="Quizzly", page_icon="📖", layout="wide")
 
 init_session_state()
+
+
+@st.cache_data(ttl=WEB_FETCH_CACHE_TTL_SECS, show_spinner=False)
+def _cached_fetch_website_text(url: str) -> tuple[bool, str, str]:
+    return fetch_website_text(url)
 
 
 def main():
@@ -127,8 +127,10 @@ def main():
             st.session_state["_persisted_answers"] = hydrated.get("answers") or {}
 
     # Load all-time error notebook history once per session/client.
-    if not (st.session_state.get("_error_notebook_history") or []):
+    # (If history is empty, avoid re-reading from disk on every rerun.)
+    if not st.session_state.get("_error_history_loaded"):
         st.session_state["_error_notebook_history"] = load_error_history(client_id)
+        st.session_state["_error_history_loaded"] = True
 
     # API Key Check via Streamlit Secrets
     if "OPENAI_API_KEY" not in st.secrets:
@@ -443,8 +445,8 @@ def main():
         """,
         unsafe_allow_html=True,
     )
-    # Slightly widen the Error Notebook rail for readability.
-    col1, col2 = st.columns([3.4, 1.6], gap="large", vertical_alignment="top")
+    # Give main content most of the width; keep a narrow right rail.
+    col1, col2 = st.columns([4, 1], gap="medium", vertical_alignment="top")
 
     with col1:
         st.title("Quizzly: Automated Quiz Generator")
