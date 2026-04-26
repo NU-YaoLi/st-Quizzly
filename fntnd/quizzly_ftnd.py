@@ -446,7 +446,7 @@ def main():
         unsafe_allow_html=True,
     )
     # Give main content most of the width; keep a narrow right rail.
-    col1, col2 = st.columns([4, 1], gap="medium", vertical_alignment="top")
+    col1, col2 = st.columns([3, 1], gap="medium", vertical_alignment="top")
 
     with col1:
         st.title("Quizzly: Automated Quiz Generator")
