@@ -118,7 +118,11 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
 2. **Question Styles (Conceptual vs. Scenario):** Within each difficulty tier, strive for a {conceptual_pct}% conceptual / {scenario_pct}% scenario split.
    - **Conceptual Questions:** Ask directly about definitions, theories, or facts stated in the text.
    - **Scenario-Based Questions:** Present a brief, hypothetical story, case study, or practical situation where the user must actively apply the document's concepts to deduce the correct answer.
-3. **No Source-Container Wording:** The question_text must be self-contained and should NOT refer to the existence or format of the source (document, text, passage, slides, notes, lecture, reading, provided material, etc.).
+3. **Precision Contract (Use Concepts as Blueprint):**
+   - Use the provided <concepts> list as the blueprint for question selection.
+   - Each question must be clearly anchored to exactly 1 concept (Easy/Medium) or 1–2 concepts (Hard).
+   - If a concept cannot support a precise, unambiguous MCQ from the provided sources, do NOT invent. Pick a different concept.
+4. **No Source-Container Wording:** The question_text must be self-contained and should NOT refer to the existence or format of the source (document, text, passage, slides, notes, lecture, reading, provided material, etc.).
    Do NOT use phrases like:
    - "according to the document/text/passage/notes/slides"
    - "mentioned in the document/slides/notes"
@@ -127,21 +131,29 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
    - "in the provided material/slides/notes"
    - "in the [X] slides/handout/deck"
    Ask the question directly about the topic as if testing prior knowledge.
-4. **Knowledge-Testing (No Giveaways):** Questions must test understanding, not the ability to spot obvious keywords.
+5. **Knowledge-Testing (No Giveaways):** Questions must test understanding, not the ability to spot obvious keywords.
    - Avoid stems that practically contain the answer (e.g., using the exact term being asked about).
    - Avoid trivial mapping like "Which application is this?" where one option repeats a phrase from the stem.
-   - For scenario questions, include at least 1 relevant constraint or complication so the student must apply the concept (not just match a label).
-   - Make distractors *close* and plausible: wrong for a precise reason (scope, definition boundary, incorrect assumption), not obviously silly.
+   - For scenario questions, include at least 2 constraints (goal + limitation + context) so the student must apply the concept, not match a label.
+   - Avoid scenario stems that can be solved by commonsense alone; require domain reasoning from the concepts.
+   - Make distractors *close* and plausible: wrong for a precise reason (scope boundary, incorrect assumption, wrong condition), not obviously silly.
    - Ensure the correct option is not uniquely identifiable by length, specificity, or wording patterns.
    - Avoid “giveaway absolutes” in options. Do NOT use absolute adverbs/quantifiers like "always", "never", "only", "all", "none", "entirely", "completely", "guaranteed", "impossible" unless the concept being tested truly requires an absolute statement. Prefer qualified, realistic wording.
-5. **Difficulty Calibration:** Match cognitive load to the label:
+6. **Distractor Rubric (High Quality Options):**
+   - All 4 options must be in the same category (e.g., all are methods, all are definitions, all are diagnoses).
+   - Distractors should be plausible to a learner but wrong for one specific reason.
+   - Avoid length/wording tells (e.g., the correct option being the longest or most specific).
+   - Avoid repeating unique keywords from the stem in only one option.
+7. **Single-Best-Answer Check:** Ensure exactly one best answer exists.
+   - If two options could be defensible, rewrite the stem/options until only one is clearly correct.
+8. **Difficulty Calibration:** Match cognitive load to the label:
    - Easy: direct but still meaningful (no pure word-matching).
    - Medium: requires applying a concept to a new situation (one reasoning step).
    - Hard: requires analyzing trade-offs, diagnosing an error, or choosing the best justification (2+ reasoning steps or comparison).
-6. **Ordering:** You MUST present the questions strictly in ascending order of difficulty (Easy -> Medium -> Hard). Assign the correct "difficulty" label to each.
-7. **Distractors:** The wrong options (distractors) must be plausible but clearly incorrect based on the text. Avoid obvious joke answers.
-8. **Explanation Formatting:** The "explanation" field is critical. To maximize readability, you MUST separate the explanation of the correct answer and the breakdowns of each wrong option using double newlines (\\n\\n).
+9. **Ordering:** You MUST present the questions strictly in ascending order of difficulty (Easy -> Medium -> Hard). Assign the correct "difficulty" label to each.
+10. **Explanation Formatting:** The "explanation" field is critical. To maximize readability, you MUST separate the explanation of the correct answer and the breakdowns of each wrong option using double newlines (\\n\\n).
    - Explanations should also be self-contained: avoid "the document/text says" phrasing. Explain the concept directly.
+   - Do not use source-container phrasing inside explanations or options either.
 
 ### STRICT CONSTRAINTS
 1. **Source Truth:** The logic to answer the question MUST come strictly from the provided document. You are encouraged to invent fictional characters or hypothetical scenarios for the questions, but the core academic concepts and correct answers must be 100% grounded in the text.
@@ -176,6 +188,19 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
       ],
       "correct_option": "B",
       "explanation": "Reading and highlighting can create an illusion of competence because it feels fluent, but without retrieval practice and feedback you often overestimate mastery and underperform on tests.\\n\\nOption A is incorrect because passive review alone is usually weaker for durable retention than retrieval practice.\\n\\nOption C is incorrect because the effective approach is typically to add practice testing and feedback loops, not rely only on highlighting.\\n\\nOption D is incorrect because context windows are an AI concept and do not explain human exam performance here."
+    }},
+    {{
+      "id": 3,
+      "difficulty": "Hard",
+      "question_text": "A student alternates between rereading notes and taking untimed practice quizzes but keeps missing the same type of question. Which change would most directly improve learning transfer, and why?",
+      "options": [
+        "A) Add immediate feedback after each quiz attempt and focus on explaining why wrong options are wrong.",
+        "B) Increase rereading time because familiarity is the strongest predictor of exam performance.",
+        "C) Switch to highlighting only, since it reduces cognitive load and prevents confusion.",
+        "D) Avoid quizzes until the material feels easy, then test at the end."
+      ],
+      "correct_option": "A",
+      "explanation": "Immediate feedback paired with retrieval practice helps correct misconceptions and strengthens the ability to apply knowledge in new contexts (transfer).\\n\\nOption B is incorrect because familiarity from rereading often overestimates mastery without improving recall under test conditions.\\n\\nOption C is incorrect because highlighting alone is a passive strategy and does not address repeated errors.\\n\\nOption D is incorrect because delaying testing reduces opportunities for corrective feedback and durable learning."
     }}
   ]
 }}
