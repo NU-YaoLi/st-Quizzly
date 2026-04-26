@@ -177,6 +177,8 @@ st.session_state.setdefault("_persisted_answers", {})
 st.session_state.setdefault("_last_autosave_hash", None)
 st.session_state.setdefault("_quiz_submitted", False)
 st.session_state.setdefault("_last_graded_hash", None)
+st.session_state.setdefault("_show_score_dialog", False)
+st.session_state.setdefault("_last_score", None)  # tuple[int, int] -> (correct, total)
 if "quiz_data" not in st.session_state:
     st.session_state.quiz_data = None
 if "error_notebook" not in st.session_state:
@@ -202,6 +204,18 @@ def main():
     qp = _get_query_params()
     quiz_id = (qp.get("quiz") or "").strip()
     debug_enabled = bool(st.secrets.get("DEBUG", False)) or (os.environ.get("DEBUG") == "1")
+
+    @st.dialog("Quiz score")
+    def _score_dialog() -> None:
+        score = st.session_state.get("_last_score") or (0, 0)
+        correct, total = score
+        st.markdown(
+            f"### **{correct} out of {total}**\n\n"
+            f"Score: **{(0 if total == 0 else (correct / total) * 100):.0f}%**"
+        )
+        if st.button("Close", use_container_width=True):
+            st.session_state._show_score_dialog = False
+            st.rerun()
 
     # If Streamlit reset our session_state (WebSocket reconnect / idle), try to rehydrate
     # from cached/disk state using URL params.
@@ -481,14 +495,15 @@ def main():
                 min_value=MIN_QUESTIONS,
                 max_value=max_questions,
                 value=MIN_QUESTIONS,
+                help="The max number of questions is auto-set from your material pages/2 to keep quiz quality high.",
             )
 
             scenario_pct = st.slider(
-                "Scenario question ratio",
+                "Question Type Ratio (Scenario:Conceptual)",
                 min_value=0,
                 max_value=100,
                 value=50,
-                step=20,
+                step=10,
                 help="Controls the % of scenario-based questions (the rest are conceptual).",
             )
 
@@ -771,6 +786,8 @@ def main():
                         grade_hash = _sha256_text(json.dumps(answers_snapshot, sort_keys=True))
                         if st.session_state.get("_last_graded_hash") != grade_hash:
                             st.session_state._last_graded_hash = grade_hash
+                            correct_count = 0
+                            total_count = len(quiz_data.get("questions", []))
                             for q in quiz_data.get("questions", []):
                                 user_ans = user_answers.get(q["id"])
                                 if user_ans is None:
@@ -779,7 +796,9 @@ def main():
                                     user_letter = ANSWER_LETTERS[int(user_ans)]
                                 except Exception:
                                     continue
-                                if user_letter != q["correct_option"]:
+                                if user_letter == q["correct_option"]:
+                                    correct_count += 1
+                                else:
                                     formatted_explanation = q["explanation"].replace("\n", "\n\n")
                                     error_entry = {
                                         "question": q["question_text"],
@@ -788,6 +807,8 @@ def main():
                                     }
                                     if error_entry not in st.session_state.error_notebook:
                                         st.session_state.error_notebook.append(error_entry)
+                            st.session_state._last_score = (correct_count, total_count)
+                            st.session_state._show_score_dialog = True
 
                         st.session_state._quiz_submitted = True
                         _persist_quiz_state(
@@ -799,6 +820,9 @@ def main():
                             answers=answers_snapshot,
                         )
                     st.rerun()
+
+            if st.session_state.get("_show_score_dialog"):
+                _score_dialog()
 
     with col2:
         with st.container(

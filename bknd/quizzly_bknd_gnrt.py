@@ -87,7 +87,7 @@ def create_generation_chain(num_questions, scenario_pct: int = 50):
     parser = JsonOutputParser()
 
     scenario_pct = int(scenario_pct)
-    if scenario_pct not in {0, 20, 40, 60, 80, 100}:
+    if scenario_pct not in {0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100}:
         scenario_pct = 50
     conceptual_pct = 100 - scenario_pct
 
