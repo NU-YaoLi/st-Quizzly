@@ -611,9 +611,35 @@ def main():
             else:
                 for idx, error in enumerate(notebook):
                     with st.expander(f"Review Question {idx + 1}"):
-                        st.markdown(f"**Q:** {error['question']}")
-                        st.markdown(f"❌ *You answered: {error['user_wrong']}*")
-                        st.markdown(f"💡 **Correction:**\n\n{error['explanation']}")
+                        q_text = error.get("question") or "Question"
+                        st.markdown(f"**Q:** {q_text}")
+
+                        options = error.get("options") or []
+                        if options:
+                            st.markdown("**Options:**")
+                            for i, opt in enumerate(options):
+                                letter = ANSWER_LETTERS[i] if i < len(ANSWER_LETTERS) else str(i)
+                                st.markdown(f"- **{letter})** {opt}")
+
+                        user_letter = error.get("user_answer_letter")
+                        user_text = error.get("user_answer_text")
+                        if user_letter is not None:
+                            if user_text:
+                                st.markdown(f"❌ **Your answer:** {user_letter}) {user_text}")
+                            else:
+                                st.markdown(f"❌ **Your answer:** {user_letter}")
+
+                        correct_letter = error.get("correct_option")
+                        correct_text = error.get("correct_answer_text")
+                        if correct_letter is not None:
+                            if correct_text:
+                                st.markdown(f"✅ **Correct answer:** {correct_letter}) {correct_text}")
+                            else:
+                                st.markdown(f"✅ **Correct answer:** {correct_letter}")
+
+                        expl = error.get("explanation")
+                        if expl:
+                            st.markdown(f"💡 **Explanation:**\n\n{expl}")
 
                 st.divider()
                 if st.button("Clear Notebook", use_container_width=True):
@@ -902,9 +928,29 @@ def main():
                                     correct_count += 1
                                 else:
                                     formatted_explanation = q["explanation"].replace("\n", "\n\n")
+                                    options = q.get("options", [])
+                                    correct_letter = q.get("correct_option")
+                                    try:
+                                        correct_idx = ANSWER_LETTERS.index(str(correct_letter))
+                                        correct_text = (
+                                            options[correct_idx] if 0 <= correct_idx < len(options) else None
+                                        )
+                                    except Exception:
+                                        correct_idx = None
+                                        correct_text = None
                                     error_entry = {
-                                        "question": q["question_text"],
-                                        "user_wrong": q["options"][int(user_ans)],
+                                        "question_id": q.get("id"),
+                                        "difficulty": q.get("difficulty"),
+                                        "question": q.get("question_text"),
+                                        "options": options,
+                                        "user_answer_index": int(user_ans),
+                                        "user_answer_letter": user_letter,
+                                        "user_answer_text": options[int(user_ans)]
+                                        if 0 <= int(user_ans) < len(options)
+                                        else None,
+                                        "correct_option": correct_letter,
+                                        "correct_answer_index": correct_idx,
+                                        "correct_answer_text": correct_text,
                                         "explanation": formatted_explanation,
                                     }
                                     cur = st.session_state.get("error_notebook_current") or []

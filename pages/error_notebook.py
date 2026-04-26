@@ -82,12 +82,33 @@ else:
         q_text = error.get("question", "Question")
         with st.expander(f"{len(history) - idx}. {q_text[:80]}"):
             st.markdown(f"**Q:** {q_text}")
-            user_wrong = error.get("user_wrong")
-            if user_wrong is not None:
-                st.markdown(f"❌ *You answered:* {user_wrong}")
+
+            options = error.get("options") or []
+            if options:
+                st.markdown("**Options:**")
+                for i, opt in enumerate(options):
+                    letter = "ABCD"[i] if i < 4 else str(i)
+                    st.markdown(f"- **{letter})** {opt}")
+
+            user_letter = error.get("user_answer_letter")
+            user_text = error.get("user_answer_text")
+            if user_letter is not None:
+                if user_text:
+                    st.markdown(f"❌ **Your answer:** {user_letter}) {user_text}")
+                else:
+                    st.markdown(f"❌ **Your answer:** {user_letter}")
+
+            correct_letter = error.get("correct_option")
+            correct_text = error.get("correct_answer_text")
+            if correct_letter is not None:
+                if correct_text:
+                    st.markdown(f"✅ **Correct answer:** {correct_letter}) {correct_text}")
+                else:
+                    st.markdown(f"✅ **Correct answer:** {correct_letter}")
+
             expl = error.get("explanation")
             if expl:
-                st.markdown(f"💡 **Correction:**\n\n{expl}")
+                st.markdown(f"💡 **Explanation:**\n\n{expl}")
 
     st.divider()
     if st.button("Clear ALL history", type="secondary", use_container_width=True):
