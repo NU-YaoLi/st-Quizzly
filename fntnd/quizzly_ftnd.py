@@ -91,33 +91,6 @@ def main():
     debug_enabled = bool(st.secrets.get("DEBUG", False)) or (os.environ.get("DEBUG") == "1")
     view = (qp.get("view") or "").strip().lower()
 
-    @st.dialog("Quiz score")
-    def _score_dialog() -> None:
-        st.markdown(
-            """
-            <style>
-            /* Force Streamlit dialog to be centered both horizontally and vertically */
-            div[data-testid="stDialog"] {
-              position: fixed !important;
-              inset: 0 !important;
-              display: flex !important;
-              align-items: center !important;
-              justify-content: center !important;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-        score = st.session_state.get("_last_score") or (0, 0)
-        correct, total = score
-        st.markdown(
-            f"### **{correct} out of {total}**\n\n"
-            f"Score: **{(0 if total == 0 else (correct / total) * 100):.0f}%**"
-        )
-        if st.button("Close", use_container_width=True):
-            st.session_state["_show_score_dialog"] = False
-            st.rerun()
-
     # If Streamlit reset our session_state (WebSocket reconnect / idle), try to rehydrate
     # from cached/disk state using URL params.
     if quiz_id and st.session_state.get("quiz_data") is None:
@@ -415,7 +388,7 @@ def main():
             )
 
             scenario_pct = st.slider(
-                "Question Type (Scenario:Conceptual)",
+                "Question Type (Scenario-based:Conceptual)",
                 min_value=0,
                 max_value=100,
                 value=50,
@@ -463,9 +436,15 @@ def main():
             set_query_params(client=client_id, quiz=quiz_id)
 
             start_time = time.time()
+            live_status = st.status("Starting workflow…", expanded=True)
 
             def log_line(s: str):
                 st.session_state["workflow_status_lines"].append(s)
+                try:
+                    live_status.update(label=s)
+                    live_status.write(s)
+                except Exception:
+                    pass
 
             client = None
             oai_file_ids: list[str] = []
@@ -528,6 +507,7 @@ def main():
                     st.session_state["_persisted_answers"] = {}
                     st.session_state["_quiz_submitted"] = False
                     st.session_state["_last_graded_hash"] = None
+                    st.session_state["_current_quiz_score"] = None
                     st.session_state["_error_notebook_current"] = []
 
                     persist_quiz_state(
@@ -542,6 +522,12 @@ def main():
                     elapsed_time = time.time() - start_time
                     st.session_state["generation_time"] = elapsed_time
                     st.session_state["workflow_status_label"] = f"Workflow complete in {elapsed_time:.1f} secs"
+                    try:
+                        live_status.update(
+                            label=st.session_state["workflow_status_label"], state="complete", expanded=False
+                        )
+                    except Exception:
+                        pass
                 st.rerun()
 
             except OpenAIError as e:
@@ -550,11 +536,19 @@ def main():
                 )
                 if debug_enabled:
                     st.info(f"**Details:** {str(e)}")
+                try:
+                    live_status.update(label="Workflow failed.", state="error", expanded=False)
+                except Exception:
+                    pass
 
             except ValueError as e:
                 st.error("A configuration or input value error occurred.")
                 if debug_enabled:
                     st.info(f"**Details:** {str(e)}")
+                try:
+                    live_status.update(label="Workflow failed.", state="error", expanded=False)
+                except Exception:
+                    pass
 
             except Exception as e:
                 error_type = type(e).__name__
@@ -563,6 +557,10 @@ def main():
                     st.info(f"**Details:** {str(e)}")
                     with st.expander("🛠️ Show Detailed Stack Trace (For Debugging)"):
                         st.code(traceback.format_exc(), language="python")
+                try:
+                    live_status.update(label="Workflow failed.", state="error", expanded=False)
+                except Exception:
+                    pass
             finally:
                 cleanup_list = st.session_state.get("cleanup_paths") or []
                 for p in cleanup_list:
@@ -755,8 +753,7 @@ def main():
                                         hist.append(error_entry)
                                         st.session_state["_error_notebook_history"] = hist
                                         save_error_history(client_id, hist)
-                            st.session_state["_last_score"] = (correct_count, total_count)
-                            st.session_state["_show_score_dialog"] = True
+                            st.session_state["_current_quiz_score"] = (correct_count, total_count)
 
                         st.session_state["_quiz_submitted"] = True
                         persist_quiz_state(
@@ -768,9 +765,6 @@ def main():
                             answers=answers_snapshot,
                         )
                     st.rerun()
-
-            if st.session_state.get("_show_score_dialog"):
-                _score_dialog()
 
     with col2:
         render_current_quiz_mistakes(

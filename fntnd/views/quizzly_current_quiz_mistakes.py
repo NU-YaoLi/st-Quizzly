@@ -3,6 +3,20 @@ import streamlit as st
 from quizzly_config import ANSWER_LETTERS
 
 
+def _clean_option_text(s: str) -> str:
+    # Many model outputs already include "A) ..." inside the option string.
+    # For display, strip any repeated leading letter prefixes like "A) A) ".
+    if not isinstance(s, str):
+        return ""
+    t = s.strip()
+    for _ in range(3):
+        if len(t) >= 3 and t[0].upper() in "ABCD" and t[1] == ")" and t[2] == " ":
+            t = t[3:].lstrip()
+        else:
+            break
+    return t
+
+
 def render_current_quiz_mistakes(*, client_id: str, quiz_id: str, persist_cb) -> None:
     """
     Render the right-rail "current quiz mistakes" notebook.
@@ -15,13 +29,20 @@ def render_current_quiz_mistakes(*, client_id: str, quiz_id: str, persist_cb) ->
         width="stretch",
         key="quizzly_error_notebook",
     ):
-        st.header("Current Quiz Mistakes")
-        st.markdown("Review your mistakes to reinforce learning.")
+        st.header("Mistakes Review")
+        score = st.session_state.get("_current_quiz_score")
+        if not score:
+            st.caption("Quiz score: N/A")
+        else:
+            correct, total = score
+            st.caption(f"Quiz score: {correct}/{total}")
+
+        st.markdown("Incorrectly answered questions will be added to your error notebook.")
         st.divider()
 
         notebook = st.session_state.get("_error_notebook_current") or []
         if not notebook:
-            st.info("No errors logged yet. Great job!")
+            st.info("No mistakes logged yet. Great job!")
             return
 
         for idx, error in enumerate(notebook):
@@ -31,26 +52,17 @@ def render_current_quiz_mistakes(*, client_id: str, quiz_id: str, persist_cb) ->
 
                 options = error.get("options") or []
                 if options:
-                    st.markdown("**Options:**")
                     for i, opt in enumerate(options):
                         letter = ANSWER_LETTERS[i] if i < len(ANSWER_LETTERS) else str(i)
-                        st.markdown(f"- **{letter})** {opt}")
+                        st.markdown(f"**{letter})** {_clean_option_text(opt)}")
 
                 user_letter = error.get("user_answer_letter")
-                user_text = error.get("user_answer_text")
-                if user_letter is not None:
-                    if user_text:
-                        st.markdown(f"❌ **Your answer:** {user_letter}) {user_text}")
-                    else:
-                        st.markdown(f"❌ **Your answer:** {user_letter}")
-
                 correct_letter = error.get("correct_option")
-                correct_text = error.get("correct_answer_text")
-                if correct_letter is not None:
-                    if correct_text:
-                        st.markdown(f"✅ **Correct answer:** {correct_letter}) {correct_text}")
-                    else:
-                        st.markdown(f"✅ **Correct answer:** {correct_letter}")
+                if user_letter is not None or correct_letter is not None:
+                    st.markdown(
+                        f"❌ **Your answer:** {'' if user_letter is None else f'{user_letter})'}"
+                        f"     ✅ **Correct answer:** {'' if correct_letter is None else f'{correct_letter})'}"
+                    )
 
                 expl = error.get("explanation")
                 if expl:

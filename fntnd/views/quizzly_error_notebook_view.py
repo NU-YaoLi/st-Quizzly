@@ -4,6 +4,18 @@ from fntnd.quizzly_state import load_error_history, save_error_history, set_quer
 from quizzly_config import ANSWER_LETTERS
 
 
+def _clean_option_text(s: str) -> str:
+    if not isinstance(s, str):
+        return ""
+    t = s.strip()
+    for _ in range(3):
+        if len(t) >= 3 and t[0].upper() in "ABCD" and t[1] == ")" and t[2] == " ":
+            t = t[3:].lstrip()
+        else:
+            break
+    return t
+
+
 def render_error_notebook_view(*, client_id: str, quiz_id: str) -> None:
     with st.sidebar:
         if st.button("← Back to Quiz", use_container_width=True):
@@ -38,26 +50,17 @@ def render_error_notebook_view(*, client_id: str, quiz_id: str) -> None:
 
             options = error.get("options") or []
             if options:
-                st.markdown("**Options:**")
                 for i, opt in enumerate(options):
                     letter = ANSWER_LETTERS[i] if i < len(ANSWER_LETTERS) else str(i)
-                    st.markdown(f"- **{letter})** {opt}")
+                    st.markdown(f"**{letter})** {_clean_option_text(opt)}")
 
             user_letter = error.get("user_answer_letter")
-            user_text = error.get("user_answer_text")
-            if user_letter is not None:
-                if user_text:
-                    st.markdown(f"❌ **Your answer:** {user_letter}) {user_text}")
-                else:
-                    st.markdown(f"❌ **Your answer:** {user_letter}")
-
             correct_letter = error.get("correct_option")
-            correct_text = error.get("correct_answer_text")
-            if correct_letter is not None:
-                if correct_text:
-                    st.markdown(f"✅ **Correct answer:** {correct_letter}) {correct_text}")
-                else:
-                    st.markdown(f"✅ **Correct answer:** {correct_letter}")
+            if user_letter is not None or correct_letter is not None:
+                st.markdown(
+                    f"❌ **Your answer:** {'' if user_letter is None else f'{user_letter})'}"
+                    f"     ✅ **Correct answer:** {'' if correct_letter is None else f'{correct_letter})'}"
+                )
 
             expl = error.get("explanation")
             if expl:
