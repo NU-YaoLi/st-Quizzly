@@ -113,6 +113,39 @@ def _state_path(client_id: str, quiz_id: str) -> str:
     return os.path.join(STATE_DIR, f"{safe_client}_{safe_quiz}.json")
 
 
+def _history_state_path(client_id: str) -> str:
+    safe_client = "".join(ch for ch in client_id if ch.isalnum())[:64] or "client"
+    return os.path.join(STATE_DIR, f"{safe_client}__error_history.json")
+
+
+def _load_error_history(client_id: str) -> list[dict]:
+    if not client_id:
+        return []
+    p = _history_state_path(client_id)
+    try:
+        if not os.path.exists(p):
+            return []
+        with open(p, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return [x for x in data if isinstance(x, dict)]
+        return []
+    except Exception:
+        return []
+
+
+def _save_error_history(client_id: str, history: list[dict]) -> None:
+    if not client_id:
+        return
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        p = _history_state_path(client_id)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(history, f)
+    except Exception:
+        pass
+
+
 def _load_state_from_disk(client_id: str, quiz_id: str) -> dict | None:
     if not client_id or not quiz_id:
         return None
@@ -180,6 +213,8 @@ st.session_state.setdefault("_last_graded_hash", None)
 st.session_state.setdefault("_show_score_dialog", False)
 st.session_state.setdefault("_last_score", None)  # tuple[int, int] -> (correct, total)
 st.session_state.setdefault("error_notebook", [])
+st.session_state.setdefault("error_notebook_current", [])
+st.session_state.setdefault("error_notebook_history", [])
 if "quiz_data" not in st.session_state:
     st.session_state.quiz_data = None
 if "verification_report" not in st.session_state:
@@ -238,8 +273,12 @@ def main():
         if hydrated:
             st.session_state.quiz_data = hydrated.get("quiz_data")
             st.session_state.verification_report = hydrated.get("verification_report")
-            st.session_state.error_notebook = hydrated.get("error_notebook") or []
+            st.session_state.error_notebook_current = hydrated.get("error_notebook") or []
             st.session_state._persisted_answers = hydrated.get("answers") or {}
+
+    # Load all-time error notebook history once per session/client.
+    if not (st.session_state.get("error_notebook_history") or []):
+        st.session_state.error_notebook_history = _load_error_history(client_id)
 
     # API Key Check via Streamlit Secrets
     if "OPENAI_API_KEY" not in st.secrets:
@@ -251,6 +290,13 @@ def main():
 
     # --- Sidebar: Upload & Settings ---
     with st.sidebar:
+        if st.button("📒 Error Notebook", use_container_width=True):
+            try:
+                st.switch_page("pages/error_notebook.py")
+            except Exception:
+                # If multipage navigation is unavailable, fall back to same-page view.
+                st.session_state["_view"] = "error_notebook"
+                st.rerun()
         st.header("Study Materials")
 
         source_mode = st.radio(
@@ -547,6 +593,45 @@ def main():
     )
     col1, col2 = st.columns([3, 1], gap="large", vertical_alignment="top")
 
+    # Render Error Notebook first so it stays visible while generation runs.
+    with col2:
+        with st.container(
+            border=True,
+            height="stretch",
+            width="stretch",
+            key="quizzly_error_notebook",
+        ):
+            st.header("Error Notebook")
+            st.markdown("Review your mistakes to reinforce learning.")
+            st.divider()
+
+            notebook = st.session_state.get("error_notebook_current") or []
+            if not notebook:
+                st.info("No errors logged yet. Great job!")
+            else:
+                for idx, error in enumerate(notebook):
+                    with st.expander(f"Review Question {idx + 1}"):
+                        st.markdown(f"**Q:** {error['question']}")
+                        st.markdown(f"❌ *You answered: {error['user_wrong']}*")
+                        st.markdown(f"💡 **Correction:**\n\n{error['explanation']}")
+
+                st.divider()
+                if st.button("Clear Notebook", use_container_width=True):
+                    st.session_state.error_notebook_current = []
+                    qp2 = _get_query_params()
+                    quiz_id_now = (qp2.get("quiz") or "").strip()
+                    if quiz_id_now and st.session_state.get("quiz_data"):
+                        persisted_answers = st.session_state.get("_persisted_answers") or {}
+                        _persist_quiz_state(
+                            client_id,
+                            quiz_id_now,
+                            quiz_data=st.session_state.quiz_data,
+                            verification_report=st.session_state.verification_report,
+                            error_notebook=[],
+                            answers=persisted_answers,
+                        )
+                    st.rerun()
+
     with col1:
         st.title("Quizzly: Automated Quiz Generator")
         st.markdown(
@@ -625,13 +710,14 @@ def main():
                     st.session_state._persisted_answers = {}
                     st.session_state._quiz_submitted = False
                     st.session_state._last_graded_hash = None
+                    st.session_state.error_notebook_current = []
 
                     _persist_quiz_state(
                         client_id,
                         quiz_id,
                         quiz_data=st.session_state.quiz_data,
                         verification_report=st.session_state.verification_report,
-                        error_notebook=st.session_state.error_notebook,
+                        error_notebook=st.session_state.get("error_notebook_current") or [],
                         answers={},
                     )
 
@@ -786,7 +872,7 @@ def main():
                             quiz_id_now,
                             quiz_data=st.session_state.quiz_data,
                             verification_report=st.session_state.verification_report,
-                            error_notebook=st.session_state.get("error_notebook") or [],
+                            error_notebook=st.session_state.get("error_notebook_current") or [],
                             answers=answers_snapshot,
                         )
 
@@ -821,10 +907,16 @@ def main():
                                         "user_wrong": q["options"][int(user_ans)],
                                         "explanation": formatted_explanation,
                                     }
-                                    nb = st.session_state.get("error_notebook") or []
-                                    if error_entry not in nb:
-                                        nb.append(error_entry)
-                                        st.session_state.error_notebook = nb
+                                    cur = st.session_state.get("error_notebook_current") or []
+                                    if error_entry not in cur:
+                                        cur.append(error_entry)
+                                        st.session_state.error_notebook_current = cur
+
+                                    hist = st.session_state.get("error_notebook_history") or []
+                                    if error_entry not in hist:
+                                        hist.append(error_entry)
+                                        st.session_state.error_notebook_history = hist
+                                        _save_error_history(client_id, hist)
                             st.session_state._last_score = (correct_count, total_count)
                             st.session_state._show_score_dialog = True
 
@@ -834,52 +926,13 @@ def main():
                             quiz_id_now,
                             quiz_data=st.session_state.quiz_data,
                             verification_report=st.session_state.verification_report,
-                            error_notebook=st.session_state.get("error_notebook") or [],
+                            error_notebook=st.session_state.get("error_notebook_current") or [],
                             answers=answers_snapshot,
                         )
                     st.rerun()
 
             if st.session_state.get("_show_score_dialog"):
                 _score_dialog()
-
-    with col2:
-        with st.container(
-            border=True,
-            height="stretch",
-            width="stretch",
-            key="quizzly_error_notebook",
-        ):
-            st.header("Error Notebook")
-            st.markdown("Review your mistakes to reinforce learning.")
-            st.divider()
-
-            notebook = st.session_state.get("error_notebook") or []
-            if not notebook:
-                st.info("No errors logged yet. Great job!")
-            else:
-                for idx, error in enumerate(notebook):
-                    with st.expander(f"Review Question {idx + 1}"):
-                        st.markdown(f"**Q:** {error['question']}")
-                        st.markdown(f"❌ *You answered: {error['user_wrong']}*")
-                        st.markdown(f"💡 **Correction:**\n\n{error['explanation']}")
-
-                st.divider()
-                if st.button("Clear Notebook", use_container_width=True):
-                    st.session_state.error_notebook = []
-                    qp2 = _get_query_params()
-                    quiz_id_now = (qp2.get("quiz") or "").strip()
-                    if quiz_id_now and st.session_state.get("quiz_data"):
-                        persisted_answers = st.session_state.get("_persisted_answers") or {}
-                        _persist_quiz_state(
-                            client_id,
-                            quiz_id_now,
-                            quiz_data=st.session_state.quiz_data,
-                            verification_report=st.session_state.verification_report,
-                            error_notebook=[],
-                            answers=persisted_answers,
-                        )
-                    st.rerun()
-
 
 if __name__ == "__main__":
     main()
