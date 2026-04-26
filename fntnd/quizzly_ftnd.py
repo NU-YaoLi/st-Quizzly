@@ -483,6 +483,15 @@ def main():
                 value=MIN_QUESTIONS,
             )
 
+            scenario_pct = st.slider(
+                "Scenario question ratio",
+                min_value=0,
+                max_value=100,
+                value=50,
+                step=20,
+                help="Controls the % of scenario-based questions (the rest are conceptual).",
+            )
+
             if source_mode == "Upload files":
                 can_generate = bool(processed_paths)
             else:
@@ -565,7 +574,7 @@ def main():
                         )
 
                     log_line(f"Generating {num_questions} questions...")
-                    generator = create_generation_chain(num_questions)
+                    generator = create_generation_chain(num_questions, scenario_pct=scenario_pct)
                     quiz_data = generator.invoke(
                         {
                             "file_ids": oai_file_ids,
