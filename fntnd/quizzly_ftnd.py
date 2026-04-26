@@ -290,13 +290,8 @@ def main():
 
     # --- Sidebar: Upload & Settings ---
     with st.sidebar:
-        if st.button("📒 Error Notebook", use_container_width=True):
-            try:
-                st.switch_page("pages/error_notebook.py")
-            except Exception:
-                # If multipage navigation is unavailable, fall back to same-page view.
-                st.session_state["_view"] = "error_notebook"
-                st.rerun()
+        # Use Streamlit's native multipage navigation (more reliable than a button).
+        st.page_link("pages/error_notebook.py", label="📒 Error Notebook", use_container_width=True)
         st.header("Study Materials")
 
         source_mode = st.radio(
@@ -591,72 +586,8 @@ def main():
         """,
         unsafe_allow_html=True,
     )
-    col1, col2 = st.columns([3, 1], gap="large", vertical_alignment="top")
-
-    # Render Error Notebook first so it stays visible while generation runs.
-    with col2:
-        with st.container(
-            border=True,
-            height="stretch",
-            width="stretch",
-            key="quizzly_error_notebook",
-        ):
-            st.header("Error Notebook")
-            st.markdown("Review your mistakes to reinforce learning.")
-            st.divider()
-
-            notebook = st.session_state.get("error_notebook_current") or []
-            if not notebook:
-                st.info("No errors logged yet. Great job!")
-            else:
-                for idx, error in enumerate(notebook):
-                    with st.expander(f"Review Question {idx + 1}"):
-                        q_text = error.get("question") or "Question"
-                        st.markdown(f"**Q:** {q_text}")
-
-                        options = error.get("options") or []
-                        if options:
-                            st.markdown("**Options:**")
-                            for i, opt in enumerate(options):
-                                letter = ANSWER_LETTERS[i] if i < len(ANSWER_LETTERS) else str(i)
-                                st.markdown(f"- **{letter})** {opt}")
-
-                        user_letter = error.get("user_answer_letter")
-                        user_text = error.get("user_answer_text")
-                        if user_letter is not None:
-                            if user_text:
-                                st.markdown(f"❌ **Your answer:** {user_letter}) {user_text}")
-                            else:
-                                st.markdown(f"❌ **Your answer:** {user_letter}")
-
-                        correct_letter = error.get("correct_option")
-                        correct_text = error.get("correct_answer_text")
-                        if correct_letter is not None:
-                            if correct_text:
-                                st.markdown(f"✅ **Correct answer:** {correct_letter}) {correct_text}")
-                            else:
-                                st.markdown(f"✅ **Correct answer:** {correct_letter}")
-
-                        expl = error.get("explanation")
-                        if expl:
-                            st.markdown(f"💡 **Explanation:**\n\n{expl}")
-
-                st.divider()
-                if st.button("Clear Notebook", use_container_width=True):
-                    st.session_state["error_notebook_current"] = []
-                    qp2 = _get_query_params()
-                    quiz_id_now = (qp2.get("quiz") or "").strip()
-                    if quiz_id_now and st.session_state.get("quiz_data"):
-                        persisted_answers = st.session_state.get("_persisted_answers") or {}
-                        _persist_quiz_state(
-                            client_id,
-                            quiz_id_now,
-                            quiz_data=st.session_state.get("quiz_data"),
-                            verification_report=st.session_state.get("verification_report"),
-                            error_notebook=[],
-                            answers=persisted_answers,
-                        )
-                    st.rerun()
+    # Slightly widen the Error Notebook rail for readability.
+    col1, col2 = st.columns([3.4, 1.6], gap="large", vertical_alignment="top")
 
     with col1:
         st.title("Quizzly: Automated Quiz Generator")
@@ -979,6 +910,70 @@ def main():
 
             if st.session_state.get("_show_score_dialog"):
                 _score_dialog()
+
+    with col2:
+        with st.container(
+            border=True,
+            height="stretch",
+            width="stretch",
+            key="quizzly_error_notebook",
+        ):
+            st.header("Error Notebook")
+            st.markdown("Review your mistakes to reinforce learning.")
+            st.divider()
+
+            notebook = st.session_state.get("error_notebook_current") or []
+            if not notebook:
+                st.info("No errors logged yet. Great job!")
+            else:
+                for idx, error in enumerate(notebook):
+                    with st.expander(f"Review Question {idx + 1}"):
+                        q_text = error.get("question") or "Question"
+                        st.markdown(f"**Q:** {q_text}")
+
+                        options = error.get("options") or []
+                        if options:
+                            st.markdown("**Options:**")
+                            for i, opt in enumerate(options):
+                                letter = ANSWER_LETTERS[i] if i < len(ANSWER_LETTERS) else str(i)
+                                st.markdown(f"- **{letter})** {opt}")
+
+                        user_letter = error.get("user_answer_letter")
+                        user_text = error.get("user_answer_text")
+                        if user_letter is not None:
+                            if user_text:
+                                st.markdown(f"❌ **Your answer:** {user_letter}) {user_text}")
+                            else:
+                                st.markdown(f"❌ **Your answer:** {user_letter}")
+
+                        correct_letter = error.get("correct_option")
+                        correct_text = error.get("correct_answer_text")
+                        if correct_letter is not None:
+                            if correct_text:
+                                st.markdown(f"✅ **Correct answer:** {correct_letter}) {correct_text}")
+                            else:
+                                st.markdown(f"✅ **Correct answer:** {correct_letter}")
+
+                        expl = error.get("explanation")
+                        if expl:
+                            st.markdown(f"💡 **Explanation:**\n\n{expl}")
+
+                st.divider()
+                if st.button("Clear Notebook", use_container_width=True):
+                    st.session_state["error_notebook_current"] = []
+                    qp2 = _get_query_params()
+                    quiz_id_now = (qp2.get("quiz") or "").strip()
+                    if quiz_id_now and st.session_state.get("quiz_data"):
+                        persisted_answers = st.session_state.get("_persisted_answers") or {}
+                        _persist_quiz_state(
+                            client_id,
+                            quiz_id_now,
+                            quiz_data=st.session_state.get("quiz_data"),
+                            verification_report=st.session_state.get("verification_report"),
+                            error_notebook=[],
+                            answers=persisted_answers,
+                        )
+                    st.rerun()
 
 if __name__ == "__main__":
     main()
