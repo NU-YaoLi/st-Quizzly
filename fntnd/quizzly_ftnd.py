@@ -207,6 +207,21 @@ def main():
 
     @st.dialog("Quiz score")
     def _score_dialog() -> None:
+        st.markdown(
+            """
+            <style>
+            /* Force Streamlit dialog to be centered both horizontally and vertically */
+            div[data-testid="stDialog"] {
+              position: fixed !important;
+              inset: 0 !important;
+              display: flex !important;
+              align-items: center !important;
+              justify-content: center !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
         score = st.session_state.get("_last_score") or (0, 0)
         correct, total = score
         st.markdown(
@@ -499,7 +514,7 @@ def main():
             )
 
             scenario_pct = st.slider(
-                "Question Type Ratio (Scenario:Conceptual)",
+                "Question Type (Scenario:Conceptual)",
                 min_value=0,
                 max_value=100,
                 value=50,
