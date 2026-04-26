@@ -529,6 +529,8 @@ def main():
 
             if not can_generate:
                 st.info("Add valid material (files or fetchable URLs) to generate a quiz.")
+
+            st.write("")
             generate_btn = st.button("Generate & Verify Quiz", type="primary", disabled=(not can_generate))
 
     # --- Main Area: Processing & Display ---

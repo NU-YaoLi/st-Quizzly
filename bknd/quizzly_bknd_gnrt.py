@@ -118,9 +118,30 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
 2. **Question Styles (Conceptual vs. Scenario):** Within each difficulty tier, strive for a {conceptual_pct}% conceptual / {scenario_pct}% scenario split.
    - **Conceptual Questions:** Ask directly about definitions, theories, or facts stated in the text.
    - **Scenario-Based Questions:** Present a brief, hypothetical story, case study, or practical situation where the user must actively apply the document's concepts to deduce the correct answer.
-3. **Ordering:** You MUST present the questions strictly in ascending order of difficulty (Easy -> Medium -> Hard). Assign the correct "difficulty" label to each.
-4. **Distractors:** The wrong options (distractors) must be plausible but clearly incorrect based on the text. Avoid obvious joke answers.
-5. **Explanation Formatting:** The "explanation" field is critical. To maximize readability, you MUST separate the explanation of the correct answer and the breakdowns of each wrong option using double newlines (\\n\\n).
+3. **No Source-Container Wording:** The question_text must be self-contained and should NOT refer to the existence or format of the source (document, text, passage, slides, notes, lecture, reading, provided material, etc.).
+   Do NOT use phrases like:
+   - "according to the document/text/passage/notes/slides"
+   - "mentioned in the document/slides/notes"
+   - "based on the reading/lecture"
+   - "the passage/text states"
+   - "in the provided material/slides/notes"
+   - "in the [X] slides/handout/deck"
+   Ask the question directly about the topic as if testing prior knowledge.
+4. **Knowledge-Testing (No Giveaways):** Questions must test understanding, not the ability to spot obvious keywords.
+   - Avoid stems that practically contain the answer (e.g., using the exact term being asked about).
+   - Avoid trivial mapping like "Which application is this?" where one option repeats a phrase from the stem.
+   - For scenario questions, include at least 1 relevant constraint or complication so the student must apply the concept (not just match a label).
+   - Make distractors *close* and plausible: wrong for a precise reason (scope, definition boundary, incorrect assumption), not obviously silly.
+   - Ensure the correct option is not uniquely identifiable by length, specificity, or wording patterns.
+   - Avoid “giveaway absolutes” in options. Do NOT use absolute adverbs/quantifiers like "always", "never", "only", "all", "none", "entirely", "completely", "guaranteed", "impossible" unless the concept being tested truly requires an absolute statement. Prefer qualified, realistic wording.
+5. **Difficulty Calibration:** Match cognitive load to the label:
+   - Easy: direct but still meaningful (no pure word-matching).
+   - Medium: requires applying a concept to a new situation (one reasoning step).
+   - Hard: requires analyzing trade-offs, diagnosing an error, or choosing the best justification (2+ reasoning steps or comparison).
+6. **Ordering:** You MUST present the questions strictly in ascending order of difficulty (Easy -> Medium -> Hard). Assign the correct "difficulty" label to each.
+7. **Distractors:** The wrong options (distractors) must be plausible but clearly incorrect based on the text. Avoid obvious joke answers.
+8. **Explanation Formatting:** The "explanation" field is critical. To maximize readability, you MUST separate the explanation of the correct answer and the breakdowns of each wrong option using double newlines (\\n\\n).
+   - Explanations should also be self-contained: avoid "the document/text says" phrasing. Explain the concept directly.
 
 ### STRICT CONSTRAINTS
 1. **Source Truth:** The logic to answer the question MUST come strictly from the provided document. You are encouraged to invent fictional characters or hypothetical scenarios for the questions, but the core academic concepts and correct answers must be 100% grounded in the text.
@@ -133,7 +154,7 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
     {{
       "id": 1,
       "difficulty": "Easy",
-      "question_text": "According to the document, why is active recall preferred over passive reading?",
+      "question_text": "Why is active recall generally preferred over passive reading as a study strategy?",
       "options": [
         "A) It requires less mental effort.",
         "B) It strengthens neural pathways through testing.",
@@ -141,12 +162,12 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
         "D) It eliminates the need for textbooks."
       ],
       "correct_option": "B",
-      "explanation": "The text states that self-testing (active recall) strengthens neural pathways through testing.\\n\\nOption A is incorrect because active recall explicitly requires more mental effort.\\n\\nOption C is incorrect because the text focuses on retention, not reading speed.\\n\\nOption D is incorrect as textbooks are still needed."
+      "explanation": "Active recall (self-testing) improves learning because retrieving information strengthens memory and understanding.\\n\\nOption A is incorrect because active recall typically requires more mental effort than passive review.\\n\\nOption C is incorrect because reading speed is not the main mechanism—retention and transfer are.\\n\\nOption D is incorrect because active recall does not eliminate the need for learning resources; it changes how you study them."
     }},
     {{
       "id": 2,
       "difficulty": "Medium",
-      "question_text": "Marcus is studying for a history exam. He spends three hours reading his textbook cover-to-cover and highlighting text, but does not take any practice tests. Based on the document, what is the most likely outcome of his study strategy?",
+      "question_text": "Marcus spends three hours reading and highlighting but does not take any practice tests. What is the most likely outcome of this study strategy?",
       "options": [
         "A) He will have deep, long-term retention of the dates and events.",
         "B) He may suffer from the 'illusion of competence' and perform poorly on the actual exam.",
@@ -154,7 +175,7 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
         "D) He will avoid context window degradation."
       ],
       "correct_option": "B",
-      "explanation": "The document explains that passive reading without feedback loops leads to the 'illusion of competence' where a student feels prepared but fails the exam.\\n\\nOption A is incorrect because passive reading is cited as the least effective method for long-term retention.\\n\\nOption C is incorrect because active recall, not passive reading, is the effective framework.\\n\\nOption D is incorrect as context windows relate to AI, not human studying."
+      "explanation": "Reading and highlighting can create an illusion of competence because it feels fluent, but without retrieval practice and feedback you often overestimate mastery and underperform on tests.\\n\\nOption A is incorrect because passive review alone is usually weaker for durable retention than retrieval practice.\\n\\nOption C is incorrect because the effective approach is typically to add practice testing and feedback loops, not rely only on highlighting.\\n\\nOption D is incorrect because context windows are an AI concept and do not explain human exam performance here."
     }}
   ]
 }}
