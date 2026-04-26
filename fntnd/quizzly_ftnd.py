@@ -179,10 +179,9 @@ st.session_state.setdefault("_quiz_submitted", False)
 st.session_state.setdefault("_last_graded_hash", None)
 st.session_state.setdefault("_show_score_dialog", False)
 st.session_state.setdefault("_last_score", None)  # tuple[int, int] -> (correct, total)
+st.session_state.setdefault("error_notebook", [])
 if "quiz_data" not in st.session_state:
     st.session_state.quiz_data = None
-if "error_notebook" not in st.session_state:
-    st.session_state.error_notebook = []
 if "verification_report" not in st.session_state:
     st.session_state.verification_report = None
 if "generation_time" not in st.session_state:
@@ -787,7 +786,7 @@ def main():
                             quiz_id_now,
                             quiz_data=st.session_state.quiz_data,
                             verification_report=st.session_state.verification_report,
-                            error_notebook=st.session_state.error_notebook,
+                            error_notebook=st.session_state.get("error_notebook") or [],
                             answers=answers_snapshot,
                         )
 
@@ -822,8 +821,10 @@ def main():
                                         "user_wrong": q["options"][int(user_ans)],
                                         "explanation": formatted_explanation,
                                     }
-                                    if error_entry not in st.session_state.error_notebook:
-                                        st.session_state.error_notebook.append(error_entry)
+                                    nb = st.session_state.get("error_notebook") or []
+                                    if error_entry not in nb:
+                                        nb.append(error_entry)
+                                        st.session_state.error_notebook = nb
                             st.session_state._last_score = (correct_count, total_count)
                             st.session_state._show_score_dialog = True
 
@@ -833,7 +834,7 @@ def main():
                             quiz_id_now,
                             quiz_data=st.session_state.quiz_data,
                             verification_report=st.session_state.verification_report,
-                            error_notebook=st.session_state.error_notebook,
+                            error_notebook=st.session_state.get("error_notebook") or [],
                             answers=answers_snapshot,
                         )
                     st.rerun()
@@ -852,10 +853,11 @@ def main():
             st.markdown("Review your mistakes to reinforce learning.")
             st.divider()
 
-            if not st.session_state.error_notebook:
+            notebook = st.session_state.get("error_notebook") or []
+            if not notebook:
                 st.info("No errors logged yet. Great job!")
             else:
-                for idx, error in enumerate(st.session_state.error_notebook):
+                for idx, error in enumerate(notebook):
                     with st.expander(f"Review Question {idx + 1}"):
                         st.markdown(f"**Q:** {error['question']}")
                         st.markdown(f"❌ *You answered: {error['user_wrong']}*")
