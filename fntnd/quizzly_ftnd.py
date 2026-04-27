@@ -597,12 +597,7 @@ def main():
                 ext_tokens = st.session_state.get("workflow_token_usage_extraction") or {}
                 gen_tokens = st.session_state.get("workflow_token_usage_generation") or {}
                 vrf_tokens = st.session_state.get("workflow_token_usage_verification") or {}
-                e_total = ext_tokens.get("total_tokens") or ext_tokens.get("total") or "?"
-                g_total = gen_tokens.get("total_tokens") or gen_tokens.get("total") or "?"
-                v_total = vrf_tokens.get("total_tokens") or vrf_tokens.get("total") or "?"
-                st.session_state["workflow_status_lines"].append(
-                    f"Tokens — extraction: {e_total}, generation: {g_total}, verification: {v_total}"
-                )
+
 
                 def _as_int(v) -> int | None:
                     try:
