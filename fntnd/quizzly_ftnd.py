@@ -446,7 +446,7 @@ def main():
                 index=0,
                 help=(
                     "Full: concept extraction + quiz generation + LLM grading verification.\n\n"
-                    "Fast: skip concept extraction and skip LLM grading (still runs output guard + schema checks)."
+                    "Fast: skip extraction and extraction, slightly compromises quiz quality)."
                 ),
             )
             fast_mode = generation_mode == "Fast"
