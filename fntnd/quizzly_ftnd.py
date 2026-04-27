@@ -868,7 +868,44 @@ def main():
 
     with col2:
         with st.container(border=True):
-            st.subheader("Quiz Score")
+            title_col, redo_col = st.columns([1, 0.9], gap="small", vertical_alignment="center")
+            with title_col:
+                st.subheader("Quiz Score")
+            with redo_col:
+                redo_clicked = st.button("Redo Quiz", use_container_width=True)
+
+            if redo_clicked:
+                # Reset quiz-taking state but keep the generated quiz + verification report.
+                quiz = st.session_state.get("quiz_data") or {}
+                for q in quiz.get("questions", []) or []:
+                    qid = q.get("id")
+                    if qid is None:
+                        continue
+                    st.session_state.pop(f"q_{qid}", None)
+
+                st.session_state["_persisted_answers"] = {}
+                st.session_state["_last_autosave_hash"] = None
+                st.session_state["_last_graded_hash"] = None
+                st.session_state["_quiz_submitted"] = False
+                st.session_state["_current_quiz_score"] = None
+                st.session_state["_error_notebook_current"] = []
+
+                quiz_id_now = (qp.get("quiz") or "").strip()
+                if quiz_id_now:
+                    persist_quiz_state(
+                        client_id,
+                        quiz_id_now,
+                        quiz_data=st.session_state.get("quiz_data"),
+                        verification_report=st.session_state.get("verification_report"),
+                        error_notebook=[],
+                        answers={},
+                        quiz_submitted=False,
+                        current_quiz_score=None,
+                        workflow_status_label=st.session_state.get("workflow_status_label"),
+                        workflow_status_lines=st.session_state.get("workflow_status_lines") or [],
+                    )
+                st.rerun()
+
             score = st.session_state.get("_current_quiz_score")
             if not score:
                 st.write("N/A")
