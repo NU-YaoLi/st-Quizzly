@@ -39,6 +39,11 @@ Quizzly runs a pipeline:
 - **Quiz generation** (MCQs)
 - **Output guard + verification** (shape checks + quality scoring)
 
+Tip: You can switch **Quiz Generation Mode**:
+
+- **Fast**: skips concept extraction + skips LLM grading verification (fastest)
+- **Full**: runs the full pipeline (best quality checks)
+
 ### 5) Take the quiz + review mistakes
 
 - Click **Submit Answers** to grade your quiz.
@@ -73,6 +78,16 @@ Useful “back-of-the-napkin” averages from that run:
 - **Cost per question**: about **$0.002 per question** ($0.10 / 50)
 
 These are **not strict linear guarantees** (there’s fixed overhead and the verification step can be expensive), but they’re a good starting point for planning.
+
+**Small PDF example (10 pages → 3 questions)**:
+
+- **Fast mode**: ~**54.4s**, ~**$0.008**
+- **Full mode**: ~**70.7s**, ~**$0.017**
+
+Notes:
+
+- Full mode can cost similar (or sometimes more/less) depending on token usage and caching.
+- Fast mode mainly saves time by skipping 2 extra model calls.
 
 ### Rules & limitations (important)
 
