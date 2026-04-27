@@ -144,7 +144,7 @@ def code_based_grading(quiz_data, expected_count):
     return final_normalized_score, feedback
 
 
-def llm_based_grading(concepts, quiz_data):
+def llm_based_grading(concepts, quiz_data, *, return_usage: bool = False):
     """
     Evaluates Task Fidelity and Pedagogical Quality using an LLM-as-a-judge.
     """
@@ -170,21 +170,38 @@ Output a JSON object strictly with the keys:
     messages = [SystemMessage(content=eval_prompt), HumanMessage(content=human_content)]
 
     parser = JsonOutputParser()
-    chain = llm | parser
-    return chain.invoke(messages)
+    if not return_usage:
+        chain = llm | parser
+        return chain.invoke(messages)
+
+    msg = llm.invoke(messages)
+    usage = {}
+    try:
+        usage = (
+            (msg.response_metadata or {}).get("token_usage")
+            or (msg.usage_metadata or {})  # type: ignore[attr-defined]
+            or {}
+        )
+    except Exception:
+        usage = {}
+    return parser.parse(msg.content), usage
 
 
-def verify_quiz(concepts, quiz_data, expected_count):
+def verify_quiz(concepts, quiz_data, expected_count, *, return_usage: bool = False):
     """
     Runs all verifications and returns a comprehensive report dictionary.
     """
     code_score, code_feedback = code_based_grading(quiz_data, expected_count)
-    llm_eval = llm_based_grading(concepts, quiz_data)
+    if return_usage:
+        llm_eval, usage = llm_based_grading(concepts, quiz_data, return_usage=True)
+    else:
+        llm_eval = llm_based_grading(concepts, quiz_data)
+        usage = {}
 
     # We consider it passed if code grading is perfect and fidelity is >= 4
     passed = (code_score == 1.0) and (llm_eval.get("task_fidelity_score", 0) >= 4)
 
-    return {
+    report = {
         "passed_constraints": passed,
         "constraint_score": code_score,
         "constraint_feedback": code_feedback,
@@ -192,4 +209,7 @@ def verify_quiz(concepts, quiz_data, expected_count):
         "pedagogical_score": llm_eval.get("pedagogical_score"),
         "evaluator_reasoning": llm_eval.get("reasoning"),
     }
+    if return_usage:
+        return report, usage
+    return report
 

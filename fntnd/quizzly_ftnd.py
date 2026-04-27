@@ -504,20 +504,24 @@ def main():
                         )
 
                     log_line(f"Generating {num_questions} questions...")
-                    generator = create_generation_chain(num_questions, scenario_pct=scenario_pct)
-                    quiz_data = generator.invoke(
+                    generator = create_generation_chain(
+                        num_questions, scenario_pct=scenario_pct, return_usage=True
+                    )
+                    quiz_data, gen_usage = generator(
                         {
                             "file_ids": oai_file_ids,
                             "concepts_list": ", ".join(concepts),
                             "web_context": st.session_state.get("_web_text", ""),
                         }
                     )
+                    st.session_state["workflow_token_usage_generation"] = gen_usage
                     log_line("Running output safety guard...")
                     quiz_data = run_quiz_output_guard(quiz_data)
                     quiz_data = validate_quiz_shape(quiz_data, num_questions)
 
                     log_line("Running quiz verification checks...")
-                    report = verify_quiz(concepts, quiz_data, num_questions)
+                    report, vrf_usage = verify_quiz(concepts, quiz_data, num_questions, return_usage=True)
+                    st.session_state["workflow_token_usage_verification"] = vrf_usage
 
                     st.session_state["verification_report"] = report
                     st.session_state["quiz_data"] = quiz_data
@@ -539,6 +543,13 @@ def main():
                     elapsed_time = time.time() - start_time
                     st.session_state["generation_time"] = elapsed_time
                     st.session_state["workflow_status_label"] = f"Workflow complete in {elapsed_time:.1f} secs"
+                    gen_tokens = st.session_state.get("workflow_token_usage_generation") or {}
+                    vrf_tokens = st.session_state.get("workflow_token_usage_verification") or {}
+                    g_total = gen_tokens.get("total_tokens") or gen_tokens.get("total") or "?"
+                    v_total = vrf_tokens.get("total_tokens") or vrf_tokens.get("total") or "?"
+                    st.session_state["workflow_status_lines"].append(
+                        f"Tokens — generation: {g_total}, verification: {v_total}"
+                    )
                     try:
                         live_status.update(
                             label=st.session_state["workflow_status_label"], state="complete", expanded=False
