@@ -29,16 +29,7 @@ def render_current_quiz_mistakes(*, client_id: str, quiz_id: str, persist_cb) ->
         width="stretch",
         key="quizzly_error_notebook",
     ):
-        title_col, score_col = st.columns([2, 1], gap="small", vertical_alignment="center")
-        with title_col:
-            st.markdown("### Mistakes Review")
-        with score_col:
-            score = st.session_state.get("_current_quiz_score")
-            if not score:
-                st.markdown("**Quiz score:** N/A")
-            else:
-                correct, total = score
-                st.markdown(f"**Quiz score:** {correct}/{total}")
+        st.header("Mistakes Review")
 
         st.markdown("Incorrectly answered questions will be added to your error notebook.")
         st.divider()

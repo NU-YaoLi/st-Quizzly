@@ -74,8 +74,6 @@ from fntnd.views.quizzly_current_quiz_mistakes import render_current_quiz_mistak
 from fntnd.views.quizzly_error_notebook_view import render_error_notebook_view
 
 
-st.set_page_config(page_title="Quizzly", page_icon="📖", layout="wide")
-
 init_session_state()
 
 
@@ -795,6 +793,15 @@ def main():
                     st.rerun()
 
     with col2:
+        with st.container(border=True):
+            st.subheader("Quiz score")
+            score = st.session_state.get("_current_quiz_score")
+            if not score:
+                st.write("N/A")
+            else:
+                correct, total = score
+                st.write(f"{correct}/{total}")
+
         render_current_quiz_mistakes(
             client_id=client_id,
             quiz_id=(qp.get("quiz") or "").strip(),
