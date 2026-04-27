@@ -60,7 +60,6 @@ Quizzly runs a pipeline:
 - **Minimum questions**: **{MIN_QUESTIONS}**.
 - **Upload size cap**: total uploaded file size must be **≤ 10 MB**.
 - **Website safety blocks**: URLs that resolve to **localhost/private/internal IPs** are blocked for safety.
-- **API key required**: you must set `OPENAI_API_KEY` in Streamlit secrets to generate quizzes.
 - **State is per client session**:
   - Quizzly saves quiz state and error notebook history so you can return after reruns.
   - If you clear browser/site data or the temp state is deleted, history may be lost.
