@@ -18,3 +18,20 @@ WEB_FETCH_CACHE_TTL_SECS = 600
 
 ANSWER_LETTERS = ["A", "B", "C", "D"]
 
+# Optional pricing for estimating quiz cost.
+# Fill in with your model pricing (USD per 1K tokens) if you want cost estimates.
+# Example:
+# MODEL_PRICING_USD_PER_1K = {
+#   "gpt-5.4-mini": {"prompt": 0.0, "completion": 0.0},
+#   "gpt-5-mini": {"prompt": 0.0, "completion": 0.0},
+# }
+MODEL_PRICING_USD_PER_1K: dict[str, dict[str, float]] = {
+    # Pricing provided by user (USD per 1M tokens):
+    # - input:  $0.25 / 1M  => $0.00025 / 1K
+    # - output: $2.00 / 1M  => $0.00200 / 1K
+    #
+    # Note: cached input ($0.03 / 1M => $0.00003 / 1K) is not applied unless
+    # usage metadata exposes cached token counts.
+    "gpt-5-mini": {"prompt": 0.00025, "completion": 0.00200},
+}
+

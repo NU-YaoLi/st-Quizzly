@@ -29,7 +29,7 @@ def render_current_quiz_mistakes(*, client_id: str, quiz_id: str, persist_cb) ->
         width="stretch",
         key="quizzly_error_notebook",
     ):
-        st.header("Mistakes Review")
+        st.subheader("Mistakes Review")
 
         st.markdown("Incorrectly answered questions will be added to your error notebook.")
         st.divider()

@@ -56,6 +56,7 @@ from quizzly_config import (
     MAX_QUESTIONS_PER_SOURCE,
     MAX_WEB_URL_SLOTS,
     MIN_QUESTIONS,
+    MODEL_PRICING_USD_PER_1K,
     WEB_FETCH_CACHE_TTL_SECS,
 )
 
@@ -464,42 +465,41 @@ def main():
             client = None
             oai_file_ids: list[str] = []
             try:
-                with st.spinner("Processing document workflow…"):
-                    client = setup_api()
+                client = setup_api()
 
-                    log_line("Uploading to secure environment...")
-                    for fp in st.session_state.get("current_paths") or []:
-                        mime_type, _ = mimetypes.guess_type(fp)
-                        if mime_type is None:
-                            mime_type = "application/octet-stream"
+                log_line("Uploading to secure environment...")
+                for fp in st.session_state.get("current_paths") or []:
+                    mime_type, _ = mimetypes.guess_type(fp)
+                    if mime_type is None:
+                        mime_type = "application/octet-stream"
 
-                        with open(fp, "rb") as f:
-                            try:
-                                oai_file = client.files.create(
-                                    file=(os.path.basename(fp), f, mime_type),
-                                    purpose="user_data",
-                                )
-                            except Exception as e:
-                                log_line(f"Failed to upload {os.path.basename(fp)}: {e}")
-                                continue
+                    with open(fp, "rb") as f:
+                        try:
+                            oai_file = client.files.create(
+                                file=(os.path.basename(fp), f, mime_type),
+                                purpose="user_data",
+                            )
+                        except Exception as e:
+                            log_line(f"Failed to upload {os.path.basename(fp)}: {e}")
+                            continue
 
-                        oai_file_ids.append(oai_file.id)
-                    if not oai_file_ids and not st.session_state.get("_web_text", ""):
-                        raise ValueError("No materials were uploaded successfully.")
+                    oai_file_ids.append(oai_file.id)
+                if not oai_file_ids and not st.session_state.get("_web_text", ""):
+                    raise ValueError("No materials were uploaded successfully.")
 
-                    log_line("Extracting core concepts...")
-                    extractor = create_extraction_chain()
-                    concepts_resp = extractor.invoke(
-                        {
-                            "file_ids": oai_file_ids,
-                            "web_context": st.session_state.get("_web_text", ""),
-                        }
+                log_line("Extracting core concepts...")
+                extractor = create_extraction_chain()
+                concepts_resp = extractor.invoke(
+                    {
+                        "file_ids": oai_file_ids,
+                        "web_context": st.session_state.get("_web_text", ""),
+                    }
+                )
+                concepts = concepts_resp.get("concepts") or []
+                if not concepts:
+                    raise ValueError(
+                        "Failed to extract concepts from the provided materials (website may be unreadable)."
                     )
-                    concepts = concepts_resp.get("concepts") or []
-                    if not concepts:
-                        raise ValueError(
-                            "Failed to extract concepts from the provided materials (website may be unreadable)."
-                        )
 
                     log_line(f"Generating {num_questions} questions...")
                     generator = create_generation_chain(
@@ -548,6 +548,44 @@ def main():
                     st.session_state["workflow_status_lines"].append(
                         f"Tokens — generation: {g_total}, verification: {v_total}"
                     )
+
+                    def _split_tokens(u: dict) -> tuple[int | None, int | None]:
+                        # Support multiple usage shapes.
+                        prompt = u.get("prompt_tokens") or u.get("input_tokens") or u.get("input") or None
+                        completion = (
+                            u.get("completion_tokens") or u.get("output_tokens") or u.get("output") or None
+                        )
+                        try:
+                            prompt = None if prompt is None else int(prompt)
+                        except Exception:
+                            prompt = None
+                        try:
+                            completion = None if completion is None else int(completion)
+                        except Exception:
+                            completion = None
+                        return prompt, completion
+
+                    def _estimate_cost(model: str, usage: dict) -> float | None:
+                        pricing = MODEL_PRICING_USD_PER_1K.get(model) or {}
+                        p_rate = pricing.get("prompt")
+                        c_rate = pricing.get("completion")
+                        if p_rate is None or c_rate is None:
+                            return None
+                        p_toks, c_toks = _split_tokens(usage)
+                        if p_toks is None or c_toks is None:
+                            return None
+                        return (p_toks / 1000.0) * float(p_rate) + (c_toks / 1000.0) * float(c_rate)
+
+                    gen_cost = _estimate_cost("gpt-5-mini", gen_tokens)
+                    vrf_cost = _estimate_cost("gpt-5-mini", vrf_tokens)
+                    if gen_cost is None or vrf_cost is None:
+                        st.session_state["workflow_status_lines"].append(
+                            "Estimated cost — N/A (set MODEL_PRICING_USD_PER_1K in quizzly_config.py)"
+                        )
+                    else:
+                        st.session_state["workflow_status_lines"].append(
+                            f"Estimated cost — generation: ${gen_cost:.4f}, verification: ${vrf_cost:.4f}, total: ${(gen_cost + vrf_cost):.4f}"
+                        )
                     try:
                         live_status.update(
                             label=st.session_state["workflow_status_label"], state="complete", expanded=False

@@ -41,7 +41,7 @@ def validate_quiz_shape(quiz, expected_count: int) -> dict:
 def create_quiz_guard_chain():
     """Second-pass safety/format check on generator JSON (one call; rewrite at most once)."""
     llm = ChatOpenAI(
-        model="gpt-5.4-mini",
+        model="gpt-5-mini",
         model_kwargs={"response_format": {"type": "json_object"}},
     )
     parser = JsonOutputParser()
