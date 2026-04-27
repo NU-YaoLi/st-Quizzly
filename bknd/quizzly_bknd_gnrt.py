@@ -157,7 +157,12 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
    - "in the provided material/slides/notes"
    - "in the [X] slides/handout/deck"
    Ask the question directly about the topic as if testing prior knowledge.
-6. **Knowledge-Testing (No Giveaways):** Questions must test understanding, not the ability to spot obvious keywords.
+6. **B1 English (Important):** Write all quiz text at **CEFR B1** level:
+   - Prefer common words and short sentences.
+   - Avoid heavy academic wording when a simpler phrase works.
+   - Keep the question stem clear and direct.
+   - Options should be short and easy to read.
+7. **Knowledge-Testing (No Giveaways):** Questions must test understanding, not the ability to spot obvious keywords.
    - Avoid stems that practically contain the answer (e.g., using the exact term being asked about).
    - Avoid trivial mapping like "Which application is this?" where one option repeats a phrase from the stem.
    - For scenario questions, include at least 2 constraints (goal + limitation + context) so the student must apply the concept, not match a label.
@@ -165,31 +170,31 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
    - Make distractors *close* and plausible: wrong for a precise reason (scope boundary, incorrect assumption, wrong condition), not obviously silly.
    - Ensure the correct option is not uniquely identifiable by length, specificity, or wording patterns.
    - Avoid “giveaway absolutes” in options. Do NOT use absolute adverbs/quantifiers like "always", "never", "only", "all", "none", "entirely", "completely", "guaranteed", "impossible" unless the concept being tested truly requires an absolute statement. Prefer qualified, realistic wording.
-7. **Ban Test-Taking Cues (Meta/Trick Wording):**
+8. **Ban Test-Taking Cues (Meta/Trick Wording):**
    - Avoid "EXCEPT", "NOT", "least", "most", "all of the following", "none of the above", and "all of the above" unless the concept explicitly requires a negation/exception; if you must use negation, make it unmissable (e.g., uppercase the NOT once) and keep the stem short.
    - Avoid giveaway phrases like "clearly", "obviously", "best", "correct", "true/false" framing, or "choose the best answer" filler.
-8. **Option Quality Constraints (Make Options Fair):**
+9. **Option Quality Constraints (Make Options Fair):**
    - All 4 options must be in the same category and grammatical form (parallel structure).
    - Keep options similar in length and specificity (no “one option is a paragraph”).
    - Avoid overlapping options (one option being a superset of another).
    - Avoid repeated unique keywords that appear in only one option; if a technical term must appear, distribute it fairly or paraphrase across options.
    - Do not include "A)", "B)", "C)", "D)" inside the option strings; options should be plain text (the UI will label them).
-9. **Distractor Generation Method (Near-Miss Misconceptions):**
+10. **Distractor Generation Method (Near-Miss Misconceptions):**
    - Generate distractors as realistic near-misses: boundary-condition error, swapped definition, incorrect precondition, wrong directionality, confusing correlated vs causal, or applying the right method in the wrong context.
    - Each distractor must be wrong for a different reason (no duplicates).
-10. **Avoid Pattern-Matching Wording:**
+11. **Avoid Pattern-Matching Wording:**
    - The stem should not contain an exact phrase that appears verbatim in only one option.
    - Prefer paraphrases and concept application over direct string overlap between stem and correct option.
-11. **Single-Best-Answer Check:** Ensure exactly one best answer exists.
+12. **Single-Best-Answer Check:** Ensure exactly one best answer exists.
    - If two options could be defensible, rewrite the stem/options until only one is clearly correct.
-12. **Difficulty Calibration:** Match cognitive load to the label:
+13. **Difficulty Calibration:** Match cognitive load to the label:
    - Easy: direct but still meaningful (no pure word-matching).
    - Medium: requires applying a concept to a new situation (1 reasoning step).
    - Hard: requires analyzing trade-offs, diagnosing an error, or choosing the best justification (1+ reasoning steps or comparison).
    - **Hard must still be readable:** use plain language, short sentences, and avoid overly academic phrasing. Prefer clarity over formality.
    - Keep Hard question stems concise (target: ≤ 40 words unless absolutely necessary).
-13. **Ordering:** You MUST present the questions strictly in ascending order of difficulty (Easy -> Medium -> Hard). Assign the correct "difficulty" label to each.
-14. **Explanations (More Pedagogical, Less Fluff):**
+14. **Ordering:** You MUST present the questions strictly in ascending order of difficulty (Easy -> Medium -> Hard). Assign the correct "difficulty" label to each.
+15. **Explanations (More Pedagogical, Less Fluff):**
    - The explanation MUST follow this structure:
      1) 1–2 sentences: why the correct option is correct, tied to the key condition(s) in the stem.
      2) Then 1 sentence per wrong option: why it is wrong (each for a different reason).

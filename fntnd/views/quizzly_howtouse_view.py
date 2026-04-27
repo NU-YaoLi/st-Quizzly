@@ -68,9 +68,9 @@ Quiz generation time and cost depend mainly on:
 
 Useful “back-of-the-napkin” averages from that run:
 
-- **Per page**: ~\(458.7 / 118 \approx 3.9\) seconds/page (overall)
-- **Per question**: ~\(458.7 / 50 \approx 9.2\) seconds/question (overall)
-- **Cost per question**: ~\($0.10 / 50 \approx $0.002\) per question (overall)
+- **Per page**: about **3.9 seconds/page** (458.7 / 118)
+- **Per question**: about **9.2 seconds/question** (458.7 / 50)
+- **Cost per question**: about **$0.002 per question** ($0.10 / 50)
 
 These are **not strict linear guarantees** (there’s fixed overhead and the verification step can be expensive), but they’re a good starting point for planning.
 
