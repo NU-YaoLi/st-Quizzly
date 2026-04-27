@@ -807,15 +807,7 @@ def main():
 
                 _btn_l, _btn_m, _btn_r = st.columns([1, 1, 1])
                 with _btn_m:
-                    st.markdown(
-                        """
-                        <style>
-                        div[data-testid="stFormSubmitButton"] {display: flex; justify-content: center;}
-                        </style>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-                    submitted = st.form_submit_button("Submit Answers")
+                    submitted = st.form_submit_button("Submit Answers", use_container_width=True)
 
                 if submitted:
                     quiz_id_now = (qp.get("quiz") or "").strip()
