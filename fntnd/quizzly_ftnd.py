@@ -865,7 +865,7 @@ def main():
 
     with col2:
         with st.container(border=True):
-            title_col, redo_col = st.columns([3, 1], gap="small", vertical_alignment="center")
+            title_col, redo_col = st.columns([2, 1], gap="small", vertical_alignment="center")
             with title_col:
                 st.subheader("Quiz Score")
             with redo_col:
