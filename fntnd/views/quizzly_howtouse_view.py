@@ -52,6 +52,28 @@ Quizzly runs a pipeline:
 
     st.markdown(
         f"""
+### Performance & cost expectations (rough)
+
+Quiz generation time and cost depend mainly on:
+
+- **Pages / amount of text**: impacts **concept extraction**.
+- **Number of questions**: impacts **generation** and **verification**.
+- **Network + model latency**: varies run-to-run.
+
+**Real example run (your measurement)**:
+
+- **118 pages** (2 files, ~9.5MB) → **50 questions**
+- Time: **~458.7 seconds** (≈ **7.6 minutes**)
+- Cost: **~$0.10**
+
+Useful “back-of-the-napkin” averages from that run:
+
+- **Per page**: ~\(458.7 / 118 \approx 3.9\) seconds/page (overall)
+- **Per question**: ~\(458.7 / 50 \approx 9.2\) seconds/question (overall)
+- **Cost per question**: ~\($0.10 / 50 \approx $0.002\) per question (overall)
+
+These are **not strict linear guarantees** (there’s fixed overhead and the verification step can be expensive), but they’re a good starting point for planning.
+
 ### Rules & limitations (important)
 
 - **One source type per run**: use either **Upload files** *or* **Website links**, not both.
@@ -60,6 +82,7 @@ Quizzly runs a pipeline:
 - **Minimum questions**: **{MIN_QUESTIONS}**.
 - **Upload size cap**: total uploaded file size must be **≤ 10 MB**.
 - **Website safety blocks**: URLs that resolve to **localhost/private/internal IPs** are blocked for safety.
+- **API cost varies**: total cost scales mostly with **question count** and **material size**, and depends on the model + cached token usage.
 - **State is per client session**:
   - Quizzly saves quiz state and error notebook history so you can return after reruns.
   - If you clear browser/site data or the temp state is deleted, history may be lost.

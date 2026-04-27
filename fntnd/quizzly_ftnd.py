@@ -604,36 +604,92 @@ def main():
                     f"Tokens — extraction: {e_total}, generation: {g_total}, verification: {v_total}"
                 )
 
-                def _split_tokens(u: dict) -> tuple[int | None, int | None]:
-                    # Support multiple usage shapes.
-                    prompt = u.get("prompt_tokens") or u.get("input_tokens") or u.get("input") or None
-                    completion = (
-                        u.get("completion_tokens") or u.get("output_tokens") or u.get("output") or None
+                def _as_int(v) -> int | None:
+                    try:
+                        if v is None:
+                            return None
+                        return int(v)
+                    except Exception:
+                        return None
+
+                def _split_tokens_precise(u: dict) -> tuple[int | None, int | None, int | None]:
+                    """
+                    Return (input_tokens, cached_input_tokens, output_tokens) when available.
+
+                    Supports multiple usage metadata shapes emitted by OpenAI / LangChain.
+                    """
+                    if not isinstance(u, dict):
+                        return None, None, None
+
+                    # Common fields
+                    input_tokens = (
+                        u.get("input_tokens")
+                        or u.get("prompt_tokens")
+                        or u.get("prompt")
+                        or u.get("input")
+                        or None
                     )
-                    try:
-                        prompt = None if prompt is None else int(prompt)
-                    except Exception:
-                        prompt = None
-                    try:
-                        completion = None if completion is None else int(completion)
-                    except Exception:
-                        completion = None
-                    return prompt, completion
+                    output_tokens = (
+                        u.get("output_tokens")
+                        or u.get("completion_tokens")
+                        or u.get("completion")
+                        or u.get("output")
+                        or None
+                    )
 
-                def _estimate_cost(model: str, usage: dict) -> float | None:
+                    # Cached input tokens can appear in nested detail objects.
+                    cached_tokens = None
+                    details = (
+                        u.get("input_tokens_details")
+                        or u.get("prompt_tokens_details")
+                        or u.get("input_details")
+                        or u.get("prompt_details")
+                        or None
+                    )
+                    if isinstance(details, dict):
+                        cached_tokens = (
+                            details.get("cached_tokens")
+                            or details.get("cache_read_tokens")
+                            or details.get("cached")
+                            or None
+                        )
+
+                    return _as_int(input_tokens), _as_int(cached_tokens) or 0, _as_int(output_tokens)
+
+                def _estimate_cost_precise(model: str, usage: dict) -> tuple[float | None, dict]:
+                    """
+                    Compute cost using input + cached_input + output token buckets.
+                    Returns (cost_or_none, breakdown_dict).
+                    """
                     pricing = MODEL_PRICING_USD_PER_1K.get(model) or {}
-                    p_rate = pricing.get("prompt")
-                    c_rate = pricing.get("completion")
-                    if p_rate is None or c_rate is None:
-                        return None
-                    p_toks, c_toks = _split_tokens(usage)
-                    if p_toks is None or c_toks is None:
-                        return None
-                    return (p_toks / 1000.0) * float(p_rate) + (c_toks / 1000.0) * float(c_rate)
+                    in_rate = pricing.get("input")
+                    cached_rate = pricing.get("cached_input")
+                    out_rate = pricing.get("output")
+                    if in_rate is None or cached_rate is None or out_rate is None:
+                        return None, {}
 
-                ext_cost = _estimate_cost("gpt-5-mini", ext_tokens)
-                gen_cost = _estimate_cost("gpt-5-mini", gen_tokens)
-                vrf_cost = _estimate_cost("gpt-5-mini", vrf_tokens)
+                    in_toks, cached_toks, out_toks = _split_tokens_precise(usage)
+                    if in_toks is None or out_toks is None or cached_toks is None:
+                        return None, {}
+
+                    # If cached tokens are reported, they are a subset of input tokens.
+                    # Bill non-cached input at input rate and cached part at cached rate.
+                    cached_toks = max(0, int(cached_toks))
+                    non_cached_in = max(0, int(in_toks) - cached_toks)
+
+                    cost = (non_cached_in / 1000.0) * float(in_rate)
+                    cost += (cached_toks / 1000.0) * float(cached_rate)
+                    cost += (int(out_toks) / 1000.0) * float(out_rate)
+
+                    return float(cost), {
+                        "input_tokens": int(in_toks),
+                        "cached_input_tokens": int(cached_toks),
+                        "output_tokens": int(out_toks),
+                    }
+
+                ext_cost, ext_bd = _estimate_cost_precise("gpt-5-mini", ext_tokens)
+                gen_cost, gen_bd = _estimate_cost_precise("gpt-5-mini", gen_tokens)
+                vrf_cost, vrf_bd = _estimate_cost_precise("gpt-5-mini", vrf_tokens)
                 if ext_cost is None or gen_cost is None or vrf_cost is None:
                     st.session_state["workflow_status_lines"].append(
                         "Estimated cost — N/A (set MODEL_PRICING_USD_PER_1K in quizzly_config.py)"
@@ -642,6 +698,12 @@ def main():
                     total_cost = ext_cost + gen_cost + vrf_cost
                     st.session_state["workflow_status_lines"].append(
                         f"Estimated cost — total: ${total_cost:.4f}"
+                    )
+                    st.session_state["workflow_status_lines"].append(
+                        "Cost breakdown (tokens: input/cached/output) — "
+                        f"extraction: {ext_bd.get('input_tokens','?')}/{ext_bd.get('cached_input_tokens','?')}/{ext_bd.get('output_tokens','?')}, "
+                        f"generation: {gen_bd.get('input_tokens','?')}/{gen_bd.get('cached_input_tokens','?')}/{gen_bd.get('output_tokens','?')}, "
+                        f"verification: {vrf_bd.get('input_tokens','?')}/{vrf_bd.get('cached_input_tokens','?')}/{vrf_bd.get('output_tokens','?')}"
                     )
                 try:
                     live_status.update(
