@@ -785,7 +785,9 @@ def main():
                             workflow_status_lines=st.session_state.get("workflow_status_lines") or [],
                         )
 
-                submitted = st.form_submit_button("Submit Answers")
+                _btn_l, _btn_m, _btn_r = st.columns([1, 1, 1])
+                with _btn_m:
+                    submitted = st.form_submit_button("Submit Answers", use_container_width=True)
 
                 if submitted:
                     quiz_id_now = (qp.get("quiz") or "").strip()

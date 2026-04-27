@@ -63,7 +63,7 @@ def render_current_quiz_mistakes(*, client_id: str, quiz_id: str, persist_cb) ->
                     st.markdown(f"💡 **Explanation:**\n\n{expl}")
 
         st.divider()
-        if st.button("Clear Notebook", use_container_width=True):
+        if st.button("Clear Mistakes Review", use_container_width=True):
             st.session_state["_error_notebook_current"] = []
             persisted_answers = st.session_state.get("_persisted_answers") or {}
             persist_cb(
