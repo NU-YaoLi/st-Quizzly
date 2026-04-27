@@ -70,6 +70,8 @@ from fntnd.quizzly_state import (
     save_error_history,
     set_query_params,
     sha256_text,
+    sign_client,
+    sign_state,
 )
 from fntnd.views.quizzly_current_quiz_mistakes import render_current_quiz_mistakes
 from fntnd.views.quizzly_error_notebook_view import render_error_notebook_view
@@ -87,13 +89,15 @@ def main():
     client_id = get_or_create_client_id()
     qp = get_query_params()
     quiz_id = (qp.get("quiz") or "").strip()
+    sig = (qp.get("sig") or "").strip()
+    csig = (qp.get("csig") or "").strip()
     debug_enabled = bool(st.secrets.get("DEBUG", False)) or (os.environ.get("DEBUG") == "1")
     view = (qp.get("view") or "").strip().lower()
 
     # If Streamlit reset our session_state (WebSocket reconnect / idle), try to rehydrate
     # from cached/disk state using URL params.
     if quiz_id and st.session_state.get("quiz_data") is None:
-        hydrated = load_state_cached(client_id, quiz_id)
+        hydrated = load_state_cached(client_id, quiz_id, sig=sig)
         if hydrated:
             st.session_state["quiz_data"] = hydrated.get("quiz_data")
             st.session_state["verification_report"] = hydrated.get("verification_report")
@@ -114,7 +118,7 @@ def main():
     # Load all-time error notebook history once per session/client.
     # (If history is empty, avoid re-reading from disk on every rerun.)
     if not st.session_state.get("_error_history_loaded"):
-        st.session_state["_error_notebook_history"] = load_error_history(client_id)
+        st.session_state["_error_notebook_history"] = load_error_history(client_id, csig=csig)
         st.session_state["_error_history_loaded"] = True
 
     # API Key Check via Streamlit Secrets
@@ -129,11 +133,22 @@ def main():
     with st.sidebar:
         if view == "errors":
             if st.button("← Back to Quiz", use_container_width=True):
-                set_query_params(client=client_id, quiz=quiz_id)
+                set_query_params(
+                    client=client_id,
+                    quiz=quiz_id,
+                    csig=csig or sign_client(client_id),
+                    sig=sig or sign_state(client_id, quiz_id),
+                )
                 st.rerun()
         else:
             if st.button("📒 Error Notebook", use_container_width=True):
-                set_query_params(client=client_id, quiz=quiz_id, view="errors")
+                set_query_params(
+                    client=client_id,
+                    quiz=quiz_id,
+                    view="errors",
+                    csig=csig or sign_client(client_id),
+                    sig=sig or sign_state(client_id, quiz_id),
+                )
                 st.rerun()
 
         # In Error Notebook view, sidebar should ONLY show "Back to Quiz".
@@ -461,7 +476,12 @@ def main():
             st.session_state["workflow_status_lines"] = []
             st.session_state["workflow_running"] = True
             quiz_id = uuid.uuid4().hex
-            set_query_params(client=client_id, quiz=quiz_id)
+            set_query_params(
+                client=client_id,
+                quiz=quiz_id,
+                csig=csig or sign_client(client_id),
+                sig=sign_state(client_id, quiz_id),
+            )
 
             start_time = time.time()
             with workflow_slot:
@@ -787,7 +807,15 @@ def main():
 
                 _btn_l, _btn_m, _btn_r = st.columns([1, 1, 1])
                 with _btn_m:
-                    submitted = st.form_submit_button("Submit Answers", use_container_width=True)
+                    st.markdown(
+                        """
+                        <style>
+                        div[data-testid="stFormSubmitButton"] {display: flex; justify-content: center;}
+                        </style>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    submitted = st.form_submit_button("Submit Answers")
 
                 if submitted:
                     quiz_id_now = (qp.get("quiz") or "").strip()

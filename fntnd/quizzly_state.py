@@ -4,6 +4,7 @@ import os
 import tempfile
 import time
 import uuid
+import hmac
 
 import streamlit as st
 
@@ -13,6 +14,46 @@ STATE_DIR = os.path.join(tempfile.gettempdir(), "quizzly_state")
 
 def sha256_text(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8", errors="ignore")).hexdigest()
+
+
+def _signing_secret() -> str | None:
+    # Prefer a dedicated secret; fall back to OPENAI_API_KEY since it's already required.
+    try:
+        s = (st.secrets.get("STATE_SIGNING_SECRET") or "").strip()
+        if s:
+            return s
+    except Exception:
+        pass
+    try:
+        s = (st.secrets.get("OPENAI_API_KEY") or "").strip()
+        if s:
+            return s
+    except Exception:
+        pass
+    s = (os.environ.get("STATE_SIGNING_SECRET") or "").strip()
+    return s or None
+
+
+def sign_state(client_id: str, quiz_id: str) -> str:
+    """
+    HMAC signature to prevent query-param guessing from loading other users' state.
+    Returns a short hex string suitable for URLs.
+    """
+    secret = _signing_secret()
+    if not secret:
+        return ""
+    msg = f"{client_id}:{quiz_id}".encode("utf-8", errors="ignore")
+    sig = hmac.new(secret.encode("utf-8", errors="ignore"), msg, hashlib.sha256).hexdigest()
+    return sig[:24]
+
+
+def sign_client(client_id: str) -> str:
+    secret = _signing_secret()
+    if not secret:
+        return ""
+    msg = f"client:{client_id}".encode("utf-8", errors="ignore")
+    sig = hmac.new(secret.encode("utf-8", errors="ignore"), msg, hashlib.sha256).hexdigest()
+    return sig[:24]
 
 
 def get_query_params() -> dict[str, str]:
@@ -45,7 +86,7 @@ def get_or_create_client_id() -> str:
         return client_id
     client_id = uuid.uuid4().hex
     quiz_id = (qp.get("quiz") or "").strip()
-    set_query_params(client=client_id, quiz=quiz_id)
+    set_query_params(client=client_id, quiz=quiz_id, csig=sign_client(client_id), sig=sign_state(client_id, quiz_id))
     return client_id
 
 
@@ -60,8 +101,11 @@ def _history_state_path(client_id: str) -> str:
     return os.path.join(STATE_DIR, f"{safe_client}__error_history.json")
 
 
-def load_error_history(client_id: str) -> list[dict]:
+def load_error_history(client_id: str, *, csig: str | None = None) -> list[dict]:
     if not client_id:
+        return []
+    expected = sign_client(client_id)
+    if expected and (csig or "") != expected:
         return []
     p = _history_state_path(client_id)
     try:
@@ -88,8 +132,11 @@ def save_error_history(client_id: str, history: list[dict]) -> None:
         pass
 
 
-def load_state_from_disk(client_id: str, quiz_id: str) -> dict | None:
+def load_state_from_disk(client_id: str, quiz_id: str, *, sig: str | None = None) -> dict | None:
     if not client_id or not quiz_id:
+        return None
+    expected = sign_state(client_id, quiz_id)
+    if expected and (sig or "") != expected:
         return None
     p = _state_path(client_id, quiz_id)
     try:
@@ -113,8 +160,8 @@ def save_state_to_disk(client_id: str, quiz_id: str, payload: dict) -> None:
         pass
 
 
-def load_state_cached(client_id: str, quiz_id: str) -> dict | None:
-    return load_state_from_disk(client_id, quiz_id)
+def load_state_cached(client_id: str, quiz_id: str, *, sig: str | None = None) -> dict | None:
+    return load_state_from_disk(client_id, quiz_id, sig=sig)
 
 
 def persist_quiz_state(

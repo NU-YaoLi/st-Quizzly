@@ -19,6 +19,7 @@ from quizzly_config import MAX_WEB_URL_SLOTS, WEB_CHARS_PER_PAGE, WEB_TEXT_PER_U
 
 PENDING_REMOVE_URL_INDEX = "_pending_remove_url_index"
 MAX_REDIRECTS = 5
+MAX_WEB_RESPONSE_BYTES = 2_000_000  # 2MB cap to prevent huge-page DoS
 
 # Defensive: prevent decompression-bomb style images from consuming huge RAM.
 # (Pillow raises DecompressionBombError / warnings when exceeded.)
@@ -144,6 +145,9 @@ def fetch_website_text(url: str) -> tuple[bool, str, str]:
     }
 
     # SSRF-safe fetch: validate each redirect hop (and disallow proxy fallbacks).
+    session = requests.Session()
+    # Avoid surprising behavior from environment proxies (security + reproducibility).
+    session.trust_env = False
     current = url
     for _ in range(MAX_REDIRECTS + 1):
         safe, reason = _check_http_url_safety(current)
@@ -151,8 +155,12 @@ def fetch_website_text(url: str) -> tuple[bool, str, str]:
             return False, "", reason
 
         try:
-            resp = requests.get(
-                current, headers=headers, timeout=(10, 20), allow_redirects=False
+            resp = session.get(
+                current,
+                headers=headers,
+                timeout=(10, 20),
+                allow_redirects=False,
+                stream=True,
             )
         except Exception:
             return False, "", "request_failed"
@@ -170,7 +178,29 @@ def fetch_website_text(url: str) -> tuple[bool, str, str]:
         except Exception:
             return False, "", "request_failed"
 
-        text = extract_readable_text(resp.text)
+        ctype = (resp.headers.get("Content-Type") or "").lower()
+        if ("text/html" not in ctype) and ("application/xhtml" not in ctype) and ("text/plain" not in ctype):
+            return False, "", "unsupported_content_type"
+
+        # Stream and cap bytes to avoid huge responses causing memory issues.
+        raw = bytearray()
+        try:
+            for chunk in resp.iter_content(chunk_size=65536):
+                if not chunk:
+                    continue
+                raw.extend(chunk)
+                if len(raw) > MAX_WEB_RESPONSE_BYTES:
+                    return False, "", "response_too_large"
+        except Exception:
+            return False, "", "request_failed"
+
+        try:
+            encoding = resp.encoding or "utf-8"
+            html = raw.decode(encoding, errors="ignore")
+        except Exception:
+            html = raw.decode("utf-8", errors="ignore")
+
+        text = extract_readable_text(html)
         break
     else:
         return False, "", "request_failed"
