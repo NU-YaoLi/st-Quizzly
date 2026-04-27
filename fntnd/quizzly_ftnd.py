@@ -445,14 +445,19 @@ def main():
             "Transform passive reading into active mastery. Upload documents or links to generate a verified, targeted quiz based on Bloom's Taxonomy."
         )
 
+        # Dedicated slot so workflow progress is always visible in the same place.
+        workflow_slot = st.container()
+
         if generate_btn:
             st.session_state["workflow_status_label"] = None
             st.session_state["workflow_status_lines"] = []
+            st.session_state["workflow_running"] = True
             quiz_id = uuid.uuid4().hex
             set_query_params(client=client_id, quiz=quiz_id)
 
             start_time = time.time()
-            live_status = st.status("Starting workflow…", expanded=True)
+            with workflow_slot:
+                live_status = st.status("Starting workflow…", expanded=True)
 
             def log_line(s: str):
                 st.session_state["workflow_status_lines"].append(s)
@@ -501,97 +506,98 @@ def main():
                         "Failed to extract concepts from the provided materials (website may be unreadable)."
                     )
 
-                    log_line(f"Generating {num_questions} questions...")
-                    generator = create_generation_chain(
-                        num_questions, scenario_pct=scenario_pct, return_usage=True
+                log_line(f"Generating {num_questions} questions...")
+                generator = create_generation_chain(
+                    num_questions, scenario_pct=scenario_pct, return_usage=True
+                )
+                quiz_data, gen_usage = generator(
+                    {
+                        "file_ids": oai_file_ids,
+                        "concepts_list": ", ".join(concepts),
+                        "web_context": st.session_state.get("_web_text", ""),
+                    }
+                )
+                st.session_state["workflow_token_usage_generation"] = gen_usage
+                log_line("Running output safety guard...")
+                quiz_data = run_quiz_output_guard(quiz_data)
+                quiz_data = validate_quiz_shape(quiz_data, num_questions)
+
+                log_line("Running quiz verification checks...")
+                report, vrf_usage = verify_quiz(concepts, quiz_data, num_questions, return_usage=True)
+                st.session_state["workflow_token_usage_verification"] = vrf_usage
+
+                st.session_state["verification_report"] = report
+                st.session_state["quiz_data"] = quiz_data
+                st.session_state["_persisted_answers"] = {}
+                st.session_state["_quiz_submitted"] = False
+                st.session_state["_last_graded_hash"] = None
+                st.session_state["_current_quiz_score"] = None
+                st.session_state["_error_notebook_current"] = []
+
+                persist_quiz_state(
+                    client_id,
+                    quiz_id,
+                    quiz_data=st.session_state.get("quiz_data"),
+                    verification_report=st.session_state.get("verification_report"),
+                    error_notebook=st.session_state.get("_error_notebook_current") or [],
+                    answers={},
+                )
+
+                elapsed_time = time.time() - start_time
+                st.session_state["generation_time"] = elapsed_time
+                st.session_state["workflow_status_label"] = f"Workflow complete in {elapsed_time:.1f} secs"
+                gen_tokens = st.session_state.get("workflow_token_usage_generation") or {}
+                vrf_tokens = st.session_state.get("workflow_token_usage_verification") or {}
+                g_total = gen_tokens.get("total_tokens") or gen_tokens.get("total") or "?"
+                v_total = vrf_tokens.get("total_tokens") or vrf_tokens.get("total") or "?"
+                st.session_state["workflow_status_lines"].append(
+                    f"Tokens — generation: {g_total}, verification: {v_total}"
+                )
+
+                def _split_tokens(u: dict) -> tuple[int | None, int | None]:
+                    # Support multiple usage shapes.
+                    prompt = u.get("prompt_tokens") or u.get("input_tokens") or u.get("input") or None
+                    completion = (
+                        u.get("completion_tokens") or u.get("output_tokens") or u.get("output") or None
                     )
-                    quiz_data, gen_usage = generator(
-                        {
-                            "file_ids": oai_file_ids,
-                            "concepts_list": ", ".join(concepts),
-                            "web_context": st.session_state.get("_web_text", ""),
-                        }
-                    )
-                    st.session_state["workflow_token_usage_generation"] = gen_usage
-                    log_line("Running output safety guard...")
-                    quiz_data = run_quiz_output_guard(quiz_data)
-                    quiz_data = validate_quiz_shape(quiz_data, num_questions)
-
-                    log_line("Running quiz verification checks...")
-                    report, vrf_usage = verify_quiz(concepts, quiz_data, num_questions, return_usage=True)
-                    st.session_state["workflow_token_usage_verification"] = vrf_usage
-
-                    st.session_state["verification_report"] = report
-                    st.session_state["quiz_data"] = quiz_data
-                    st.session_state["_persisted_answers"] = {}
-                    st.session_state["_quiz_submitted"] = False
-                    st.session_state["_last_graded_hash"] = None
-                    st.session_state["_current_quiz_score"] = None
-                    st.session_state["_error_notebook_current"] = []
-
-                    persist_quiz_state(
-                        client_id,
-                        quiz_id,
-                        quiz_data=st.session_state.get("quiz_data"),
-                        verification_report=st.session_state.get("verification_report"),
-                        error_notebook=st.session_state.get("_error_notebook_current") or [],
-                        answers={},
-                    )
-
-                    elapsed_time = time.time() - start_time
-                    st.session_state["generation_time"] = elapsed_time
-                    st.session_state["workflow_status_label"] = f"Workflow complete in {elapsed_time:.1f} secs"
-                    gen_tokens = st.session_state.get("workflow_token_usage_generation") or {}
-                    vrf_tokens = st.session_state.get("workflow_token_usage_verification") or {}
-                    g_total = gen_tokens.get("total_tokens") or gen_tokens.get("total") or "?"
-                    v_total = vrf_tokens.get("total_tokens") or vrf_tokens.get("total") or "?"
-                    st.session_state["workflow_status_lines"].append(
-                        f"Tokens — generation: {g_total}, verification: {v_total}"
-                    )
-
-                    def _split_tokens(u: dict) -> tuple[int | None, int | None]:
-                        # Support multiple usage shapes.
-                        prompt = u.get("prompt_tokens") or u.get("input_tokens") or u.get("input") or None
-                        completion = (
-                            u.get("completion_tokens") or u.get("output_tokens") or u.get("output") or None
-                        )
-                        try:
-                            prompt = None if prompt is None else int(prompt)
-                        except Exception:
-                            prompt = None
-                        try:
-                            completion = None if completion is None else int(completion)
-                        except Exception:
-                            completion = None
-                        return prompt, completion
-
-                    def _estimate_cost(model: str, usage: dict) -> float | None:
-                        pricing = MODEL_PRICING_USD_PER_1K.get(model) or {}
-                        p_rate = pricing.get("prompt")
-                        c_rate = pricing.get("completion")
-                        if p_rate is None or c_rate is None:
-                            return None
-                        p_toks, c_toks = _split_tokens(usage)
-                        if p_toks is None or c_toks is None:
-                            return None
-                        return (p_toks / 1000.0) * float(p_rate) + (c_toks / 1000.0) * float(c_rate)
-
-                    gen_cost = _estimate_cost("gpt-5-mini", gen_tokens)
-                    vrf_cost = _estimate_cost("gpt-5-mini", vrf_tokens)
-                    if gen_cost is None or vrf_cost is None:
-                        st.session_state["workflow_status_lines"].append(
-                            "Estimated cost — N/A (set MODEL_PRICING_USD_PER_1K in quizzly_config.py)"
-                        )
-                    else:
-                        st.session_state["workflow_status_lines"].append(
-                            f"Estimated cost — generation: ${gen_cost:.4f}, verification: ${vrf_cost:.4f}, total: ${(gen_cost + vrf_cost):.4f}"
-                        )
                     try:
-                        live_status.update(
-                            label=st.session_state["workflow_status_label"], state="complete", expanded=False
-                        )
+                        prompt = None if prompt is None else int(prompt)
                     except Exception:
-                        pass
+                        prompt = None
+                    try:
+                        completion = None if completion is None else int(completion)
+                    except Exception:
+                        completion = None
+                    return prompt, completion
+
+                def _estimate_cost(model: str, usage: dict) -> float | None:
+                    pricing = MODEL_PRICING_USD_PER_1K.get(model) or {}
+                    p_rate = pricing.get("prompt")
+                    c_rate = pricing.get("completion")
+                    if p_rate is None or c_rate is None:
+                        return None
+                    p_toks, c_toks = _split_tokens(usage)
+                    if p_toks is None or c_toks is None:
+                        return None
+                    return (p_toks / 1000.0) * float(p_rate) + (c_toks / 1000.0) * float(c_rate)
+
+                gen_cost = _estimate_cost("gpt-5-mini", gen_tokens)
+                vrf_cost = _estimate_cost("gpt-5-mini", vrf_tokens)
+                if gen_cost is None or vrf_cost is None:
+                    st.session_state["workflow_status_lines"].append(
+                        "Estimated cost — N/A (set MODEL_PRICING_USD_PER_1K in quizzly_config.py)"
+                    )
+                else:
+                    st.session_state["workflow_status_lines"].append(
+                        f"Estimated cost — generation: ${gen_cost:.4f}, verification: ${vrf_cost:.4f}, total: ${(gen_cost + vrf_cost):.4f}"
+                    )
+                try:
+                    live_status.update(
+                        label=st.session_state["workflow_status_label"], state="complete", expanded=False
+                    )
+                except Exception:
+                    pass
+                st.session_state["workflow_running"] = False
                 st.rerun()
 
             except OpenAIError as e:
@@ -626,6 +632,7 @@ def main():
                 except Exception:
                     pass
             finally:
+                st.session_state["workflow_running"] = False
                 cleanup_list = st.session_state.get("cleanup_paths") or []
                 for p in cleanup_list:
                     try:
@@ -645,10 +652,11 @@ def main():
 
         status_label = st.session_state.get("workflow_status_label")
         if status_label:
-            with st.expander(status_label, expanded=False):
-                lines = st.session_state.get("workflow_status_lines") or []
-                if lines:
-                    st.code("\n".join(lines))
+            with workflow_slot:
+                with st.expander(status_label, expanded=False):
+                    lines = st.session_state.get("workflow_status_lines") or []
+                    if lines:
+                        st.code("\n".join(lines))
 
         quiz_data = st.session_state.get("quiz_data")
         if quiz_data:

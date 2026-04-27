@@ -158,5 +158,6 @@ def init_session_state() -> None:
     st.session_state.setdefault("cleanup_paths", [])
     st.session_state.setdefault("workflow_status_label", None)
     st.session_state.setdefault("workflow_status_lines", [])
+    st.session_state.setdefault("workflow_running", False)
     st.session_state.setdefault("web_url_slot_count", 1)
 
