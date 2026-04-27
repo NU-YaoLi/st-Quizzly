@@ -148,14 +148,11 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
    - "Scenario (…):", "Conceptual (…):", "Conceptual/Scenario (…):"
    - Any leading tag in the form "[…]" or "(…)" that describes the question type/topic
    Write the question directly without a prefixed label.
-5. **No Source-Container Wording:** The question_text must be self-contained and should NOT refer to the existence or format of the source (document, text, passage, slides, notes, lecture, reading, provided material, etc.).
+5. **No Source-Container Wording:** The question_text must be self-contained and should NOT refer to the existence or format of the source.
    Do NOT use phrases like:
    - "according to the document/text/passage/notes/slides"
-   - "mentioned in the document/slides/notes"
    - "based on the reading/lecture"
-   - "the passage/text states"
    - "in the provided material/slides/notes"
-   - "in the [X] slides/handout/deck"
    Ask the question directly about the topic as if testing prior knowledge.
 6. **B1 English (Important):** Write all quiz text at **CEFR B1** level:
    - Prefer common words and short sentences.
