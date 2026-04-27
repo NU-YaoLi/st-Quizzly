@@ -53,10 +53,10 @@ from quizzly_config import (
     ANSWER_LETTERS,
     FILE_FINGERPRINT_BYTES,
     MAX_QUESTIONS_CAP,
-    MAX_QUESTIONS_PER_SOURCE,
     MAX_WEB_URL_SLOTS,
     MIN_QUESTIONS,
     MODEL_PRICING_USD_PER_1K,
+    QUIZZLY_MODEL,
     WEB_FETCH_CACHE_TTL_SECS,
 )
 
@@ -375,7 +375,7 @@ def main():
                 source_count = len(processed_paths)
                 max_questions = max(
                     MIN_QUESTIONS,
-                    min(MAX_QUESTIONS_CAP, total_pages // 2, source_count * MAX_QUESTIONS_PER_SOURCE),
+                    min(MAX_QUESTIONS_CAP, total_pages // 2),
                 )
 
             else:
@@ -411,7 +411,7 @@ def main():
 
                 max_questions = max(
                     MIN_QUESTIONS,
-                    min(MAX_QUESTIONS_CAP, total_web_pages // 2, source_count * MAX_QUESTIONS_PER_SOURCE),
+                    min(MAX_QUESTIONS_CAP, total_web_pages // 2),
                 )
 
             st.session_state["current_paths"] = processed_paths
@@ -716,9 +716,9 @@ def main():
                         "output_tokens": int(out_toks),
                     }
 
-                ext_cost, ext_bd = _estimate_cost_precise("gpt-5-mini", ext_tokens)
-                gen_cost, gen_bd = _estimate_cost_precise("gpt-5-mini", gen_tokens)
-                vrf_cost, vrf_bd = _estimate_cost_precise("gpt-5-mini", vrf_tokens)
+                ext_cost, ext_bd = _estimate_cost_precise(QUIZZLY_MODEL, ext_tokens)
+                gen_cost, gen_bd = _estimate_cost_precise(QUIZZLY_MODEL, gen_tokens)
+                vrf_cost, vrf_bd = _estimate_cost_precise(QUIZZLY_MODEL, vrf_tokens)
                 # In Fast mode, extraction/verif may be skipped. We still want a precise
                 # total for the steps that have usage metadata.
                 if gen_cost is None:

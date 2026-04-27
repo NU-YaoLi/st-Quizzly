@@ -4,7 +4,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_openai import ChatOpenAI
 
-from quizzly_config import ANSWER_LETTERS
+from quizzly_config import ANSWER_LETTERS, QUIZZLY_MODEL
 
 
 def validate_quiz_shape(quiz, expected_count: int) -> dict:
@@ -41,7 +41,7 @@ def validate_quiz_shape(quiz, expected_count: int) -> dict:
 def create_quiz_guard_chain():
     """Second-pass safety/format check on generator JSON (one call; rewrite at most once)."""
     llm = ChatOpenAI(
-        model="gpt-5-mini",
+        model=QUIZZLY_MODEL,
         model_kwargs={"response_format": {"type": "json_object"}},
     )
     parser = JsonOutputParser()
@@ -149,7 +149,8 @@ def llm_based_grading(concepts, quiz_data, *, return_usage: bool = False):
     Evaluates Task Fidelity and Pedagogical Quality using an LLM-as-a-judge.
     """
     llm = ChatOpenAI(
-        model="gpt-5-mini", model_kwargs={"response_format": {"type": "json_object"}}
+        model=QUIZZLY_MODEL,
+        model_kwargs={"response_format": {"type": "json_object"}},
     )
 
     eval_prompt = """You are an expert curriculum evaluator and instructional design auditor.

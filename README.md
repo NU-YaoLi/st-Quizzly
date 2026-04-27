@@ -82,7 +82,7 @@ streamlit run quizzly_main.py
 ## Configuration knobs
 
 - **Question limits**: edit `quizzly_config.py`
-  - `MAX_QUESTIONS_CAP`, `MIN_QUESTIONS`, `MAX_QUESTIONS_PER_SOURCE`, etc.
+  - `MAX_QUESTIONS_CAP`, `MIN_QUESTIONS`, etc.
 - **Cost estimates**
   - `quizzly_config.py` includes `MODEL_PRICING_USD_PER_1K` used to estimate total cost from token usage.
 - **Session signing**
