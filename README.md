@@ -93,9 +93,11 @@ streamlit run quizzly_main.py
 - **Website fetching**: some pages (search results, heavily scripted sites, paywalls) may fail or extract too little text.
 - **Privacy**: in file mode, materials are sent to the OpenAI API to generate your quiz; the app attempts to delete uploaded file objects after the workflow completes.
 - **State storage**: quiz state + error history are stored in your OS temp directory under a `quizzly_state` folder.
-- **Performance**: small quizzes still have fixed overhead (upload + model roundtrips). Example (10-page PDF → 3 questions):
-  - **Fast mode**: ~54s, ~$0.008
-  - **Full mode**: ~71s, ~$0.017
+- **Performance**: quiz runs have fixed overhead (upload + model roundtrips) and scale with pages + question count.
+  - Example (50-page PDF → 25 questions):
+    - `gpt-5-mini`: **~235s**, **~$0.05**
+    - `gpt-5.4-mini`: **~67s**, **~$0.12**
+  - Relative to `gpt-5-mini`, `gpt-5.4-mini` is **~3.5× faster** and **~2.4× more expensive** (based on the example above).
 
 ## Project layout
 

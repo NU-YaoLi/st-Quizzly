@@ -5,7 +5,7 @@ MAX_WEB_URL_SLOTS = 5
 # Model configuration
 # -------------------
 # Single source of truth for the model used across all backend steps.
-QUIZZLY_MODEL = "gpt-5.4-mini"
+QUIZZLY_MODEL = "gpt-5-mini"
 
 # Website sizing (heuristic)
 WEB_CHARS_PER_PAGE = 2500

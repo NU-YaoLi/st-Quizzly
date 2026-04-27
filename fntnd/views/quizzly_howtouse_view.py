@@ -67,22 +67,15 @@ Quiz generation time and cost depend mainly on:
 
 **Real example run (your measurement)**:
 
-- **118 pages** (2 files, ~9.5MB) → **50 questions**
-- Time: **~458.7 seconds** (≈ **7.6 minutes**)
-- Cost: **~$0.10**
+- **50 pages** (1 PDF) → **25 questions** (Full mode, `gpt-5-mini`)
+- Time: **~235 seconds** (≈ **3.9 minutes**)
+- Cost: **~$0.05**
 
 Useful “back-of-the-napkin” averages from that run:
 
-- **Per page**: about **3.9 seconds/page** (458.7 / 118)
-- **Per question**: about **9.2 seconds/question** (458.7 / 50)
-- **Cost per question**: about **$0.002 per question** ($0.10 / 50)
-
-These are **not strict linear guarantees** (there’s fixed overhead and the verification step can be expensive), but they’re a good starting point for planning.
-
-**Small PDF example (10 pages → 3 questions)**:
-
-- **Fast mode**: ~**54.4s**, ~**$0.008**
-- **Full mode**: ~**70.7s**, ~**$0.017**
+- **Per page**: about **4.7 seconds/page** (235 / 50)
+- **Per question**: about **9.4 seconds/question** (235 / 25)
+- **Cost per question**: about **$0.002 per question** ($0.05 / 25)
 
 Notes:
 
