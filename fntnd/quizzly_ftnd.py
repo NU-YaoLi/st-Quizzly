@@ -493,13 +493,14 @@ def main():
                     raise ValueError("No materials were uploaded successfully.")
 
                 log_line("Extracting core concepts...")
-                extractor = create_extraction_chain()
-                concepts_resp = extractor.invoke(
+                extractor = create_extraction_chain(return_usage=True)
+                concepts_resp, ext_usage = extractor(
                     {
                         "file_ids": oai_file_ids,
                         "web_context": st.session_state.get("_web_text", ""),
                     }
                 )
+                st.session_state["workflow_token_usage_extraction"] = ext_usage
                 concepts = concepts_resp.get("concepts") or []
                 if not concepts:
                     raise ValueError(
@@ -546,12 +547,14 @@ def main():
                 elapsed_time = time.time() - start_time
                 st.session_state["generation_time"] = elapsed_time
                 st.session_state["workflow_status_label"] = f"Workflow complete in {elapsed_time:.1f} secs"
+                ext_tokens = st.session_state.get("workflow_token_usage_extraction") or {}
                 gen_tokens = st.session_state.get("workflow_token_usage_generation") or {}
                 vrf_tokens = st.session_state.get("workflow_token_usage_verification") or {}
+                e_total = ext_tokens.get("total_tokens") or ext_tokens.get("total") or "?"
                 g_total = gen_tokens.get("total_tokens") or gen_tokens.get("total") or "?"
                 v_total = vrf_tokens.get("total_tokens") or vrf_tokens.get("total") or "?"
                 st.session_state["workflow_status_lines"].append(
-                    f"Tokens — generation: {g_total}, verification: {v_total}"
+                    f"Tokens — extraction: {e_total}, generation: {g_total}, verification: {v_total}"
                 )
 
                 def _split_tokens(u: dict) -> tuple[int | None, int | None]:
@@ -581,15 +584,17 @@ def main():
                         return None
                     return (p_toks / 1000.0) * float(p_rate) + (c_toks / 1000.0) * float(c_rate)
 
+                ext_cost = _estimate_cost("gpt-5-mini", ext_tokens)
                 gen_cost = _estimate_cost("gpt-5-mini", gen_tokens)
                 vrf_cost = _estimate_cost("gpt-5-mini", vrf_tokens)
-                if gen_cost is None or vrf_cost is None:
+                if ext_cost is None or gen_cost is None or vrf_cost is None:
                     st.session_state["workflow_status_lines"].append(
                         "Estimated cost — N/A (set MODEL_PRICING_USD_PER_1K in quizzly_config.py)"
                     )
                 else:
+                    total_cost = ext_cost + gen_cost + vrf_cost
                     st.session_state["workflow_status_lines"].append(
-                        f"Estimated cost — generation: ${gen_cost:.4f}, verification: ${vrf_cost:.4f}, total: ${(gen_cost + vrf_cost):.4f}"
+                        f"Estimated cost — total: ${total_cost:.4f}"
                     )
                 try:
                     live_status.update(
@@ -840,7 +845,7 @@ def main():
 
     with col2:
         with st.container(border=True):
-            st.subheader("Quiz score")
+            st.subheader("Quiz Score")
             score = st.session_state.get("_current_quiz_score")
             if not score:
                 st.write("N/A")
