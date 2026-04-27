@@ -440,6 +440,17 @@ def main():
                 help="Controls the % of scenario-based questions (the rest are conceptual).",
             )
 
+            generation_mode = st.selectbox(
+                "Quiz Generation Mode",
+                ["Full", "Fast"],
+                index=0,
+                help=(
+                    "Full: concept extraction + quiz generation + LLM grading verification.\n\n"
+                    "Fast: skip concept extraction and skip LLM grading (still runs output guard + schema checks)."
+                ),
+            )
+            fast_mode = generation_mode == "Fast"
+
             if source_mode == "Upload files":
                 can_generate = bool(processed_paths)
             else:
@@ -535,20 +546,26 @@ def main():
                 if not oai_file_ids and not st.session_state.get("_web_text", ""):
                     raise ValueError("No materials were uploaded successfully.")
 
-                log_line("Extracting core concepts...")
-                extractor = create_extraction_chain(return_usage=True)
-                concepts_resp, ext_usage = extractor(
-                    {
-                        "file_ids": oai_file_ids,
-                        "web_context": st.session_state.get("_web_text", ""),
-                    }
-                )
-                st.session_state["workflow_token_usage_extraction"] = ext_usage
-                concepts = concepts_resp.get("concepts") or []
-                if not concepts:
-                    raise ValueError(
-                        "Failed to extract concepts from the provided materials (website may be unreadable)."
+                concepts: list[str] = []
+                ext_usage: dict = {}
+                if fast_mode:
+                    log_line("Fast mode: skipping concept extraction…")
+                    st.session_state["workflow_token_usage_extraction"] = {}
+                else:
+                    log_line("Extracting core concepts...")
+                    extractor = create_extraction_chain(return_usage=True)
+                    concepts_resp, ext_usage = extractor(
+                        {
+                            "file_ids": oai_file_ids,
+                            "web_context": st.session_state.get("_web_text", ""),
+                        }
                     )
+                    st.session_state["workflow_token_usage_extraction"] = ext_usage
+                    concepts = concepts_resp.get("concepts") or []
+                    if not concepts:
+                        raise ValueError(
+                            "Failed to extract concepts from the provided materials (website may be unreadable)."
+                        )
 
                 log_line(f"Generating {num_questions} questions...")
                 generator = create_generation_chain(
@@ -557,7 +574,7 @@ def main():
                 quiz_data, gen_usage = generator(
                     {
                         "file_ids": oai_file_ids,
-                        "concepts_list": ", ".join(concepts),
+                        "concepts_list": "" if fast_mode else ", ".join(concepts),
                         "web_context": st.session_state.get("_web_text", ""),
                     }
                 )
@@ -566,9 +583,26 @@ def main():
                 quiz_data = run_quiz_output_guard(quiz_data)
                 quiz_data = validate_quiz_shape(quiz_data, num_questions)
 
-                log_line("Running quiz verification checks...")
-                report, vrf_usage = verify_quiz(concepts, quiz_data, num_questions, return_usage=True)
-                st.session_state["workflow_token_usage_verification"] = vrf_usage
+                report: dict | None = None
+                vrf_usage: dict = {}
+                if fast_mode:
+                    log_line("Fast mode: skipping LLM grading verification…")
+                    report = {
+                        "passed_constraints": True,
+                        "constraint_score": 1.0,
+                        "constraint_feedback": [
+                            "Fast mode enabled: skipped LLM grading verification.",
+                            "Schema validation and output guard still ran.",
+                        ],
+                        "fidelity_score": None,
+                        "pedagogical_score": None,
+                        "evaluator_reasoning": "Skipped in Fast mode.",
+                    }
+                    st.session_state["workflow_token_usage_verification"] = {}
+                else:
+                    log_line("Running quiz verification checks...")
+                    report, vrf_usage = verify_quiz(concepts, quiz_data, num_questions, return_usage=True)
+                    st.session_state["workflow_token_usage_verification"] = vrf_usage
 
                 st.session_state["verification_report"] = report
                 st.session_state["quiz_data"] = quiz_data
@@ -685,20 +719,22 @@ def main():
                 ext_cost, ext_bd = _estimate_cost_precise("gpt-5-mini", ext_tokens)
                 gen_cost, gen_bd = _estimate_cost_precise("gpt-5-mini", gen_tokens)
                 vrf_cost, vrf_bd = _estimate_cost_precise("gpt-5-mini", vrf_tokens)
-                if ext_cost is None or gen_cost is None or vrf_cost is None:
+                # In Fast mode, extraction/verif may be skipped. We still want a precise
+                # total for the steps that have usage metadata.
+                if gen_cost is None:
                     st.session_state["workflow_status_lines"].append(
                         "Estimated cost — N/A (set MODEL_PRICING_USD_PER_1K in quizzly_config.py)"
                     )
                 else:
-                    total_cost = ext_cost + gen_cost + vrf_cost
+                    total_cost = float(gen_cost) + float(ext_cost or 0.0) + float(vrf_cost or 0.0)
                     st.session_state["workflow_status_lines"].append(
                         f"Estimated cost — total: ${total_cost:.4f}"
                     )
                     st.session_state["workflow_status_lines"].append(
                         "Cost breakdown (tokens: input/cached/output) — "
-                        f"extraction: {ext_bd.get('input_tokens','?')}/{ext_bd.get('cached_input_tokens','?')}/{ext_bd.get('output_tokens','?')}, "
+                        f"extraction: {ext_bd.get('input_tokens','-')}/{ext_bd.get('cached_input_tokens','-')}/{ext_bd.get('output_tokens','-')}, "
                         f"generation: {gen_bd.get('input_tokens','?')}/{gen_bd.get('cached_input_tokens','?')}/{gen_bd.get('output_tokens','?')}, "
-                        f"verification: {vrf_bd.get('input_tokens','?')}/{vrf_bd.get('cached_input_tokens','?')}/{vrf_bd.get('output_tokens','?')}"
+                        f"verification: {vrf_bd.get('input_tokens','-')}/{vrf_bd.get('cached_input_tokens','-')}/{vrf_bd.get('output_tokens','-')}"
                     )
                 try:
                     live_status.update(

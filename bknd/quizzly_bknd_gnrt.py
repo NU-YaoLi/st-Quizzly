@@ -268,15 +268,19 @@ Final reminder: Produce only the specified JSON quiz. Do not add preambles. Do n
         concepts = inputs.get("concepts_list", "")
         web_text = inputs.get("web_context", "")
 
-        content = [
-            {
-                "type": "text",
-                "text": (
-                    "<task>Focus the quiz strictly on these extracted core concepts:</task>\n"
-                    f"<concepts>{concepts}</concepts>"
-                ),
-            }
-        ]
+        concepts = str(concepts or "").strip()
+        if concepts:
+            focus_text = (
+                "<task>Focus the quiz strictly on these extracted core concepts:</task>\n"
+                f"<concepts>{concepts}</concepts>"
+            )
+        else:
+            focus_text = (
+                "<task>No concepts list was provided. Infer the key concepts from the user materials, "
+                "then generate the quiz.</task>"
+            )
+
+        content = [{"type": "text", "text": focus_text}]
         if file_ids:
             content.append(
                 {
