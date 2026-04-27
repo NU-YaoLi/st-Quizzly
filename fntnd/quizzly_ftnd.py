@@ -75,6 +75,7 @@ from fntnd.quizzly_state import (
 )
 from fntnd.views.quizzly_current_quiz_mistakes import render_current_quiz_mistakes
 from fntnd.views.quizzly_error_notebook_view import render_error_notebook_view
+from fntnd.views.quizzly_howtouse_view import render_how_to_use_view
 
 
 init_session_state()
@@ -131,7 +132,7 @@ def main():
 
     # --- Sidebar: Upload & Settings ---
     with st.sidebar:
-        if view == "errors":
+        if view in {"errors", "howto"}:
             if st.button("← Back to Quiz", use_container_width=True):
                 set_query_params(
                     client=client_id,
@@ -141,6 +142,15 @@ def main():
                 )
                 st.rerun()
         else:
+            if st.button("❓ How to use", use_container_width=True):
+                set_query_params(
+                    client=client_id,
+                    quiz=quiz_id,
+                    view="howto",
+                    csig=csig or sign_client(client_id),
+                    sig=sig or sign_state(client_id, quiz_id),
+                )
+                st.rerun()
             if st.button("📒 Error Notebook", use_container_width=True):
                 set_query_params(
                     client=client_id,
@@ -151,8 +161,8 @@ def main():
                 )
                 st.rerun()
 
-        # In Error Notebook view, sidebar should ONLY show "Back to Quiz".
-        if view == "errors":
+        # In non-quiz views, sidebar should ONLY show "Back to Quiz".
+        if view in {"errors", "howto"}:
             source_mode = "Upload files"
             files_mode = True
             uploaded_files = None
@@ -440,6 +450,11 @@ def main():
 
             st.write("")
             generate_btn = st.button("Generate & Verify Quiz", type="primary", disabled=(not can_generate))
+
+    # --- How-to-use view ---
+    if view == "howto":
+        render_how_to_use_view()
+        return
 
     # --- Error Notebook view (all-time history) ---
     if view == "errors":
