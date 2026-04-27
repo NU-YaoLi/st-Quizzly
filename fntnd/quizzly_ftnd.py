@@ -99,6 +99,17 @@ def main():
             st.session_state["verification_report"] = hydrated.get("verification_report")
             st.session_state["_error_notebook_current"] = hydrated.get("error_notebook") or []
             st.session_state["_persisted_answers"] = hydrated.get("answers") or {}
+            st.session_state["_quiz_submitted"] = bool(hydrated.get("quiz_submitted") or False)
+            score = hydrated.get("current_quiz_score")
+            if isinstance(score, (list, tuple)) and len(score) == 2:
+                try:
+                    st.session_state["_current_quiz_score"] = (int(score[0]), int(score[1]))
+                except Exception:
+                    st.session_state["_current_quiz_score"] = None
+            else:
+                st.session_state["_current_quiz_score"] = None
+            st.session_state["workflow_status_label"] = hydrated.get("workflow_status_label")
+            st.session_state["workflow_status_lines"] = hydrated.get("workflow_status_lines") or []
 
     # Load all-time error notebook history once per session/client.
     # (If history is empty, avoid re-reading from disk on every rerun.)
@@ -542,6 +553,10 @@ def main():
                     verification_report=st.session_state.get("verification_report"),
                     error_notebook=st.session_state.get("_error_notebook_current") or [],
                     answers={},
+                    quiz_submitted=st.session_state.get("_quiz_submitted"),
+                    current_quiz_score=st.session_state.get("_current_quiz_score"),
+                    workflow_status_label=st.session_state.get("workflow_status_label"),
+                    workflow_status_lines=st.session_state.get("workflow_status_lines") or [],
                 )
 
                 elapsed_time = time.time() - start_time
@@ -767,6 +782,10 @@ def main():
                             verification_report=st.session_state.get("verification_report"),
                             error_notebook=st.session_state.get("_error_notebook_current") or [],
                             answers=answers_snapshot,
+                            quiz_submitted=st.session_state.get("_quiz_submitted"),
+                            current_quiz_score=st.session_state.get("_current_quiz_score"),
+                            workflow_status_label=st.session_state.get("workflow_status_label"),
+                            workflow_status_lines=st.session_state.get("workflow_status_lines") or [],
                         )
 
                 submitted = st.form_submit_button("Submit Answers")
@@ -840,6 +859,10 @@ def main():
                             verification_report=st.session_state.get("verification_report"),
                             error_notebook=st.session_state.get("_error_notebook_current") or [],
                             answers=answers_snapshot,
+                            quiz_submitted=st.session_state.get("_quiz_submitted"),
+                            current_quiz_score=st.session_state.get("_current_quiz_score"),
+                            workflow_status_label=st.session_state.get("workflow_status_label"),
+                            workflow_status_lines=st.session_state.get("workflow_status_lines") or [],
                         )
                     st.rerun()
 
@@ -863,6 +886,10 @@ def main():
                 verification_report=st.session_state.get("verification_report"),
                 error_notebook=kwargs["error_notebook_current"],
                 answers=kwargs["answers"],
+                quiz_submitted=st.session_state.get("_quiz_submitted"),
+                current_quiz_score=st.session_state.get("_current_quiz_score"),
+                workflow_status_label=st.session_state.get("workflow_status_label"),
+                workflow_status_lines=st.session_state.get("workflow_status_lines") or [],
             ),
         )
 

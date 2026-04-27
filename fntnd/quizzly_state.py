@@ -125,6 +125,10 @@ def persist_quiz_state(
     verification_report: dict | None,
     error_notebook: list[dict],
     answers: dict[str, int | None],
+    quiz_submitted: bool | None = None,
+    current_quiz_score: tuple[int, int] | None = None,
+    workflow_status_label: str | None = None,
+    workflow_status_lines: list[str] | None = None,
 ) -> None:
     payload = {
         "saved_at": time.time(),
@@ -132,6 +136,10 @@ def persist_quiz_state(
         "verification_report": verification_report,
         "error_notebook": error_notebook,
         "answers": answers,
+        "quiz_submitted": bool(quiz_submitted) if quiz_submitted is not None else None,
+        "current_quiz_score": list(current_quiz_score) if current_quiz_score is not None else None,
+        "workflow_status_label": workflow_status_label,
+        "workflow_status_lines": workflow_status_lines,
     }
     save_state_to_disk(client_id, quiz_id, payload)
     try:
