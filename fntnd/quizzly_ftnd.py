@@ -131,48 +131,45 @@ def main():
             if st.button("← Back to Quiz", use_container_width=True):
                 set_query_params(client=client_id, quiz=quiz_id)
                 st.rerun()
-            st.markdown(
-                """
-                <style>
-                section[data-testid="stSidebar"] [class*="st-key-quizzly_sidebar_controls"] {
-                    display: none !important;
-                }
-                </style>
-                """,
-                unsafe_allow_html=True,
-            )
         else:
             if st.button("📒 Error Notebook", use_container_width=True):
                 set_query_params(client=client_id, quiz=quiz_id, view="errors")
                 st.rerun()
 
-        with st.container(key="quizzly_sidebar_controls"):
-            st.header("Study Materials")
-
-        source_mode = st.radio(
-            "Material source (choose one)",
-            ["Upload files", "Website links"],
-            horizontal=True,
-            help="Use either uploaded files (up to 5) or website URLs (up to 5), not both.",
-        )
-
-        files_mode = source_mode == "Upload files"
-        if files_mode:
-            # Prevent stale website text from influencing file-only runs.
-            st.session_state["_web_text"] = ""
-
-        # Always mount the uploader (stable key) so switching source mode does not drop uploads.
-        uploaded_files = st.file_uploader(
-            "Upload files (PDF, DOCX, PPTX, TXT, PNG, JPG) — max 5",
-            type=["pdf", "docx", "pptx", "txt", "png", "jpg", "jpeg"],
-            accept_multiple_files=True,
-            key="quizzly_study_files",
-            disabled=not files_mode,
-        )
-        if files_mode and uploaded_files and len(uploaded_files) > 5:
-            st.error("Please upload at most 5 files. Remove extras and try again.")
+        # In Error Notebook view, sidebar should ONLY show "Back to Quiz".
+        if view == "errors":
+            source_mode = "Upload files"
+            files_mode = True
             uploaded_files = None
-        website_urls: list[str] = []
+            website_urls: list[str] = []
+        else:
+            with st.container(key="quizzly_sidebar_controls"):
+                st.header("Study Materials")
+
+            source_mode = st.radio(
+                "Material source (choose one)",
+                ["Upload files", "Website links"],
+                horizontal=True,
+                help="Use either uploaded files (up to 5) or website URLs (up to 5), not both.",
+            )
+
+            files_mode = source_mode == "Upload files"
+            if files_mode:
+                # Prevent stale website text from influencing file-only runs.
+                st.session_state["_web_text"] = ""
+
+            # Always mount the uploader (stable key) so switching source mode does not drop uploads.
+            uploaded_files = st.file_uploader(
+                "Upload files (PDF, DOCX, PPTX, TXT, PNG, JPG) — max 5",
+                type=["pdf", "docx", "pptx", "txt", "png", "jpg", "jpeg"],
+                accept_multiple_files=True,
+                key="quizzly_study_files",
+                disabled=not files_mode,
+            )
+            if files_mode and uploaded_files and len(uploaded_files) > 5:
+                st.error("Please upload at most 5 files. Remove extras and try again.")
+                uploaded_files = None
+            website_urls: list[str] = []
 
         if not files_mode:
             st.markdown(
@@ -868,7 +865,7 @@ def main():
 
     with col2:
         with st.container(border=True):
-            title_col, redo_col = st.columns([1, 0.9], gap="small", vertical_alignment="center")
+            title_col, redo_col = st.columns([3, 1], gap="small", vertical_alignment="center")
             with title_col:
                 st.subheader("Quiz Score")
             with redo_col:
