@@ -10,3 +10,5 @@ python-pptx
 reportlab 
 pillow
 supabase
+pandas
+plotly

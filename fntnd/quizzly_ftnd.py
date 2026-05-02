@@ -80,8 +80,12 @@ from fntnd.quizzly_state import (
     sign_state,
 )
 from fntnd.views.quizzly_current_quiz_mistakes import render_current_quiz_mistakes
+from fntnd.views.quizzly_data_analysis_view import render_data_analysis_view
 from fntnd.views.quizzly_error_notebook_view import render_error_notebook_view
 from fntnd.views.quizzly_howtouse_view import render_how_to_use_view
+
+# Sidebar “utility” views: hide materials UI; quiz state stays in session.
+_QUIZ_AUX_VIEWS = frozenset({"howto", "errors", "analytics"})
 
 
 init_session_state()
@@ -138,7 +142,7 @@ def main():
 
     # --- Sidebar: Upload & Settings ---
     with st.sidebar:
-        if view in {"errors", "howto"}:
+        if view in _QUIZ_AUX_VIEWS:
             if st.button("← Back to Quiz", use_container_width=True):
                 set_query_params(
                     client=client_id,
@@ -166,9 +170,18 @@ def main():
                     sig=sig or sign_state(client_id, quiz_id),
                 )
                 st.rerun()
+            if st.button("📊 Data analysis", use_container_width=True):
+                set_query_params(
+                    client=client_id,
+                    quiz=quiz_id,
+                    view="analytics",
+                    csig=csig or sign_client(client_id),
+                    sig=sig or sign_state(client_id, quiz_id),
+                )
+                st.rerun()
 
         # In non-quiz views, sidebar should ONLY show "Back to Quiz".
-        if view in {"errors", "howto"}:
+        if view in _QUIZ_AUX_VIEWS:
             source_mode = "Upload files"
             files_mode = True
             uploaded_files = None
@@ -294,7 +307,7 @@ def main():
         has_files = bool(uploaded_files)
         has_urls = bool(website_urls)
 
-        if view != "errors" and (
+        if view not in _QUIZ_AUX_VIEWS and (
             (source_mode == "Upload files" and has_files)
             or (source_mode == "Website links" and has_urls)
         ):
@@ -478,6 +491,11 @@ def main():
         render_error_notebook_view(client_id=client_id, quiz_id=quiz_id)
         return
 
+    # --- Usage / cost analytics (all visitors, Supabase) ---
+    if view == "analytics":
+        render_data_analysis_view()
+        return
+
     # --- Main Area: Processing & Display ---
     st.markdown(
         """
@@ -636,14 +654,6 @@ def main():
                     workflow_status_lines=st.session_state.get("workflow_status_lines") or [],
                 )
 
-                _rl_err = record_successful_generation(hash_client_ip(get_client_ip()))
-                if _rl_err:
-                    st.session_state["workflow_status_lines"].append(
-                        f"Warning: could not record daily usage for rate limit ({_rl_err})."
-                    )
-                    if debug_enabled:
-                        st.warning(f"Could not record daily usage: {_rl_err}")
-
                 elapsed_time = time.time() - start_time
                 st.session_state["generation_time"] = elapsed_time
                 st.session_state["workflow_status_label"] = f"Workflow complete in {elapsed_time:.1f} secs"
@@ -738,6 +748,7 @@ def main():
                 ext_cost, ext_bd = _estimate_cost_precise(QUIZZLY_MODEL, ext_tokens)
                 gen_cost, gen_bd = _estimate_cost_precise(QUIZZLY_MODEL, gen_tokens)
                 vrf_cost, vrf_bd = _estimate_cost_precise(QUIZZLY_MODEL, vrf_tokens)
+                _total_for_db: float | None = None
                 # In Fast mode, extraction/verif may be skipped. We still want a precise
                 # total for the steps that have usage metadata.
                 if gen_cost is None:
@@ -746,6 +757,7 @@ def main():
                     )
                 else:
                     total_cost = float(gen_cost) + float(ext_cost or 0.0) + float(vrf_cost or 0.0)
+                    _total_for_db = total_cost
                     st.session_state["workflow_status_lines"].append(
                         f"Estimated cost — total: ${total_cost:.4f}"
                     )
@@ -755,6 +767,16 @@ def main():
                         f"generation: {gen_bd.get('input_tokens','?')}/{gen_bd.get('cached_input_tokens','?')}/{gen_bd.get('output_tokens','?')}, "
                         f"verification: {vrf_bd.get('input_tokens','-')}/{vrf_bd.get('cached_input_tokens','-')}/{vrf_bd.get('output_tokens','-')}"
                     )
+                _rl_err = record_successful_generation(
+                    hash_client_ip(get_client_ip()),
+                    estimated_cost_usd=_total_for_db,
+                )
+                if _rl_err:
+                    st.session_state["workflow_status_lines"].append(
+                        f"Warning: could not record daily usage for rate limit ({_rl_err})."
+                    )
+                    if debug_enabled:
+                        st.warning(f"Could not record daily usage: {_rl_err}")
                 try:
                     live_status.update(
                         label=st.session_state["workflow_status_label"], state="complete", expanded=False

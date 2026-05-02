@@ -93,14 +93,14 @@ Quiz generation time and cost depend mainly on:
 
 | Mode | Model | Time | Cost |
 |---|---|---:|---:|
-| Full | `gpt-5-mini` | ~235s (≈ 3.9 min) | ~$0.05 |
-| Fast | `gpt-5-mini` | ~197s (≈ 3.3 min) | ~$0.03 |
+| Full | `gpt-5-mini` | ~235s (≈ 3.9 min) | ~\\$0.05 |
+| Fast | `gpt-5-mini` | ~197s (≈ 3.3 min) | ~\\$0.03 |
 
 Useful “back-of-the-napkin” averages (Full mode row above):
 
 - **Per page**: about **4.7 seconds/page** (235 / 50)
 - **Per question**: about **9.4 seconds/question** (235 / 25)
-- **Cost per question**: about **$0.002 per question** ($0.05 / 25)
+- **Cost per question**: about **\\$0.002 per question** (\\$0.05 / 25)
 
 Notes:
 

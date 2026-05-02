@@ -1,11 +1,49 @@
--- Quizzly Supabase schema (minimal): daily quiz-generation rate limit only.
--- Run this in Supabase → SQL Editor before deploying with SUPABASE_* secrets.
+-- Quizzly Supabase schema: rate limiting + usage analytics.
+-- Run new sections in Supabase → SQL Editor when you deploy or upgrade.
 
+-- ---------------------------------------------------------------------------
+-- Core table (one row per successful quiz generation)
+-- ---------------------------------------------------------------------------
 create table if not exists public.quiz_generation_usage (
   id uuid primary key default gen_random_uuid(),
   ip_hash text not null,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  estimated_cost_usd numeric(14, 6)
 );
 
 create index if not exists quiz_generation_usage_ip_hash_created_at_idx
   on public.quiz_generation_usage (ip_hash, created_at desc);
+
+create index if not exists quiz_generation_usage_created_at_idx
+  on public.quiz_generation_usage (created_at desc);
+
+-- Add spend column on existing deployments (safe if already present)
+alter table public.quiz_generation_usage
+  add column if not exists estimated_cost_usd numeric(14, 6);
+
+-- ---------------------------------------------------------------------------
+-- Daily aggregates for the analytics dashboard (optional but recommended)
+-- ---------------------------------------------------------------------------
+create or replace function public.quizzly_usage_by_day(
+  p_start timestamptz,
+  p_end timestamptz
+)
+returns table (
+  day date,
+  generations bigint,
+  total_cost_usd numeric,
+  distinct_visitors bigint
+)
+language sql
+stable
+as $$
+  select
+    (u.created_at at time zone 'UTC')::date as day,
+    count(*)::bigint as generations,
+    coalesce(sum(u.estimated_cost_usd), 0)::numeric as total_cost_usd,
+    count(distinct u.ip_hash)::bigint as distinct_visitors
+  from public.quiz_generation_usage u
+  where u.created_at >= p_start and u.created_at < p_end
+  group by 1
+  order by 1;
+$$;

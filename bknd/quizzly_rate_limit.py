@@ -93,6 +93,11 @@ def _client():
     return create_client(url, key)
 
 
+def supabase_admin_client():
+    """Configured Supabase client (service role), or None if secrets/url missing."""
+    return _client()
+
+
 def utc_day_start() -> datetime:
     now = datetime.now(timezone.utc)
     return now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -179,7 +184,11 @@ def check_daily_generation_allowed() -> RateLimitResult:
     return RateLimitResult(True, used_today=used)
 
 
-def record_successful_generation(ip_hash: str) -> str | None:
+def record_successful_generation(
+    ip_hash: str,
+    *,
+    estimated_cost_usd: float | None = None,
+) -> str | None:
     """Insert one usage row. Returns error string or None on success."""
     if rate_limit_disabled():
         return None
@@ -188,8 +197,9 @@ def record_successful_generation(ip_hash: str) -> str | None:
     if supabase is None:
         return None
 
+    row: dict = {"ip_hash": ip_hash, "estimated_cost_usd": estimated_cost_usd}
     try:
-        supabase.table(TABLE_NAME).insert({"ip_hash": ip_hash}).execute()
+        supabase.table(TABLE_NAME).insert(row).execute()
     except Exception as e:
         return str(e)
     return None

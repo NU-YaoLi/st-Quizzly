@@ -96,7 +96,9 @@ class TestDailyGenerationRateLimit(unittest.TestCase):
             err = record_successful_generation("abc123hash")
             self.assertIsNone(err)
             mock_sb.table.assert_called_with("quiz_generation_usage")
-            mock_sb.table.return_value.insert.assert_called_once_with({"ip_hash": "abc123hash"})
+            mock_sb.table.return_value.insert.assert_called_once_with(
+                {"ip_hash": "abc123hash", "estimated_cost_usd": None}
+            )
 
 
 if __name__ == "__main__":
