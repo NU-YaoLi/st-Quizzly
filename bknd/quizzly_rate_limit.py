@@ -1,20 +1,21 @@
 """
-Daily per-IP quiz generation limits backed by Supabase (Postgres).
-
-Stores only a salted hash of the client IP and a timestamp — no other fields.
+Daily per-client-IP quiz generation limits backed by Supabase (`user_ip` + `quiz_generation_usage`).
 """
 
 from __future__ import annotations
 
-import hashlib
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+
 import streamlit as st
 
+from bknd.quizzly_usage_log import QuizGenerationUsageFields
+from bknd.quizzly_user_ip import get_or_create_user_ip_id
 from quizzly_config import DAILY_GENERATION_LIMIT, SUPABASE_URL
 
 TABLE_NAME = "quiz_generation_usage"
+_SESSION_USER_IP_ID = "_quizzly_user_ip_id"
 
 
 @dataclass(frozen=True)
@@ -39,20 +40,6 @@ def rate_limit_disabled() -> bool:
         return True
     v = _secret("RATE_LIMIT_DISABLED")
     return v is not None and v.strip().lower() in ("1", "true", "yes")
-
-
-def _ip_salt() -> str:
-    s = _secret("RATE_LIMIT_IP_SALT")
-    if s:
-        return s
-    k = _secret("SUPABASE_SERVICE_ROLE_KEY") or ""
-    if not k:
-        return "quizzly-default-salt-not-configured"
-    return hashlib.sha256((k + "|quizzly-ip").encode()).hexdigest()
-
-
-def hash_client_ip(ip: str) -> str:
-    return hashlib.sha256(f"{_ip_salt()}:{ip}".encode()).hexdigest()
 
 
 def get_client_ip() -> str:
@@ -120,21 +107,18 @@ def format_time_until_next_utc_midnight() -> str:
     return f"{s} second{'s' if s != 1 else ''}"
 
 
-def count_generations_today(ip_hash: str) -> tuple[int | None, str | None]:
-    """
-    Returns (count, error_message). count is None if the query failed.
-    """
+def count_generations_today(user_ip_id: str) -> tuple[int | None, str | None]:
+    """Returns (count, error_message)."""
     supabase = _client()
     if supabase is None:
         return None, "Supabase is not configured (set SUPABASE_SERVICE_ROLE_KEY in Streamlit secrets)."
 
     start = utc_day_start().isoformat()
     try:
-        # head=True: count via Content-Range only; no row bodies transferred.
         res = (
             supabase.table(TABLE_NAME)
             .select("id", count="exact", head=True)
-            .eq("ip_hash", ip_hash)
+            .eq("user_ip_id", user_ip_id)
             .gte("created_at", start)
             .execute()
         )
@@ -143,13 +127,17 @@ def count_generations_today(ip_hash: str) -> tuple[int | None, str | None]:
             return None, "Unexpected Supabase response (missing count)."
         return int(n), None
     except Exception as e:
+        msg = f"{type(e).__name__}: {e!s}"
+        # Legacy schema might still filter on ip_hash
+        if "user_ip_id" in msg or "42703" in msg or (
+            "does not exist" in msg.lower() and "column" in msg.lower()
+        ):
+            return None, msg
         return None, str(e)
 
 
 def check_daily_generation_allowed() -> RateLimitResult:
-    """
-    Call before starting generation. Uses UTC calendar day.
-    """
+    """Call before starting generation. Uses UTC calendar day."""
     if rate_limit_disabled():
         return RateLimitResult(True, used_today=0)
 
@@ -157,9 +145,25 @@ def check_daily_generation_allowed() -> RateLimitResult:
     if not url or not key:
         return RateLimitResult(True, used_today=0)
 
+    supabase = _client()
+    if supabase is None:
+        return RateLimitResult(True, used_today=0)
+
     ip = get_client_ip()
-    ip_hash = hash_client_ip(ip)
-    used, err = count_generations_today(ip_hash)
+    uid, uerr = get_or_create_user_ip_id(supabase, ip)
+    if uid:
+        st.session_state[_SESSION_USER_IP_ID] = uid
+    if not uid:
+        return RateLimitResult(
+            False,
+            message=(
+                "Could not verify the daily usage limit (user_ip). Please try again in a moment. "
+                f"({uerr or 'unknown error'})"
+            ),
+            used_today=None,
+        )
+
+    used, err = count_generations_today(uid)
     if err is not None:
         return RateLimitResult(
             False,
@@ -185,9 +189,9 @@ def check_daily_generation_allowed() -> RateLimitResult:
 
 
 def record_successful_generation(
-    ip_hash: str,
+    user_ip_id: str | None,
     *,
-    estimated_cost_usd: float | None = None,
+    usage: QuizGenerationUsageFields | None = None,
 ) -> str | None:
     """Insert one usage row. Returns error string or None on success."""
     if rate_limit_disabled():
@@ -197,19 +201,23 @@ def record_successful_generation(
     if supabase is None:
         return None
 
-    row_full: dict = {"ip_hash": ip_hash, "estimated_cost_usd": estimated_cost_usd}
-    row_min: dict = {"ip_hash": ip_hash}
+    uid = user_ip_id or st.session_state.get(_SESSION_USER_IP_ID)
+    if not uid:
+        ip = get_client_ip()
+        uid, _ = get_or_create_user_ip_id(supabase, ip)
+    if not uid:
+        return "Could not resolve user_ip_id for usage log."
+
+    row_full: dict = (
+        usage.as_insert_dict(uid) if usage is not None else {"user_ip_id": uid, "estimated_cost_usd": None}
+    )
+    row_min: dict = {"user_ip_id": uid}
     try:
         supabase.table(TABLE_NAME).insert(row_full).execute()
         return None
     except Exception as e:
         msg = f"{type(e).__name__}: {e!s}"
-        # DB missing `estimated_cost_usd` until migration is applied — keep rate-limit inserts working.
-        if (
-            "estimated_cost_usd" in msg
-            or "42703" in msg
-            or ("does not exist" in msg.lower() and "column" in msg.lower())
-        ):
+        if "42703" in msg or ("does not exist" in msg.lower() and "column" in msg.lower()):
             try:
                 supabase.table(TABLE_NAME).insert(row_min).execute()
                 return None

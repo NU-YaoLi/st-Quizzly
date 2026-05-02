@@ -10,13 +10,13 @@ import hashlib
 import streamlit as st
 from openai import OpenAIError
 
-from bknd.quizzly_bknd_gnrt import (
+from bknd.quizzly_question_gnrt import (
     create_extraction_chain,
     create_generation_chain,
     get_page_count,
     setup_api,
 )
-from bknd.quizzly_bknd_upldprcs import (
+from bknd.quizzly_question_upldprcs import (
     PENDING_REMOVE_URL_INDEX,
     apply_pending_web_url_removal,
     docx_to_pdf,
@@ -27,14 +27,13 @@ from bknd.quizzly_bknd_upldprcs import (
 )
 from bknd.quizzly_rate_limit import (
     check_daily_generation_allowed,
-    get_client_ip,
-    hash_client_ip,
     record_successful_generation,
 )
+from bknd.quizzly_usage_log import QuizGenerationUsageFields, token_triple_from_breakdown
 
 try:
     # Streamlit Cloud can temporarily run a stale build; make this import robust.
-    from bknd.quizzly_bknd_vrf import (
+    from bknd.quizzly_question_vrf import (
         run_quiz_output_guard,
         validate_quiz_shape,
         verify_quiz,
@@ -436,6 +435,21 @@ def main():
             st.session_state["current_paths"] = processed_paths
             st.session_state["cleanup_paths"] = cleanup_paths
 
+            if source_mode == "Upload files":
+                st.session_state["_usage_upload_total_bytes"] = sum(
+                    int(len(uf.getbuffer())) for uf in unique_uploads
+                )
+                st.session_state["_usage_material_quantity"] = len(processed_paths)
+                st.session_state["_usage_material_source"] = "upload_files"
+                st.session_state["_usage_web_text_chars"] = None
+            else:
+                st.session_state["_usage_upload_total_bytes"] = None
+                st.session_state["_usage_material_quantity"] = len(web_blocks)
+                st.session_state["_usage_material_source"] = "website_links"
+                st.session_state["_usage_web_text_chars"] = len(
+                    (st.session_state.get("_web_text") or "")
+                )
+
             if source_count == 0:
                 st.warning("Materials loaded: 0 sources — check your URLs or switch to file upload.")
             else:
@@ -767,9 +781,31 @@ def main():
                         f"generation: {gen_bd.get('input_tokens','?')}/{gen_bd.get('cached_input_tokens','?')}/{gen_bd.get('output_tokens','?')}, "
                         f"verification: {vrf_bd.get('input_tokens','-')}/{vrf_bd.get('cached_input_tokens','-')}/{vrf_bd.get('output_tokens','-')}"
                     )
-                _rl_err = record_successful_generation(
-                    hash_client_ip(get_client_ip()),
+                ei_t, ei_c, ei_o = token_triple_from_breakdown(ext_bd)
+                gi_t, gi_c, gi_o = token_triple_from_breakdown(gen_bd)
+                vi_t, vi_c, vi_o = token_triple_from_breakdown(vrf_bd)
+                _usage_log = QuizGenerationUsageFields(
                     estimated_cost_usd=_total_for_db,
+                    num_questions=int(num_questions),
+                    generation_mode="fast" if fast_mode else "full",
+                    material_source=st.session_state.get("_usage_material_source"),
+                    material_quantity=st.session_state.get("_usage_material_quantity"),
+                    upload_total_bytes=st.session_state.get("_usage_upload_total_bytes"),
+                    web_text_chars=st.session_state.get("_usage_web_text_chars"),
+                    ext_input_tokens=ei_t,
+                    ext_cached_input_tokens=ei_c,
+                    ext_output_tokens=ei_o,
+                    gen_input_tokens=gi_t,
+                    gen_cached_input_tokens=gi_c,
+                    gen_output_tokens=gi_o,
+                    vrf_input_tokens=vi_t,
+                    vrf_cached_input_tokens=vi_c,
+                    vrf_output_tokens=vi_o,
+                    generation_duration_sec=float(elapsed_time),
+                )
+                _rl_err = record_successful_generation(
+                    st.session_state.get("_quizzly_user_ip_id"),
+                    usage=_usage_log,
                 )
                 if _rl_err:
                     st.session_state["workflow_status_lines"].append(

@@ -13,6 +13,16 @@ from typing import Any
 
 from bknd.quizzly_rate_limit import TABLE_NAME, supabase_admin_client
 
+USAGE_DETAIL_COLUMNS = (
+    "created_at,estimated_cost_usd,user_ip_id,generation_mode,material_source,"
+    "generation_duration_sec,"
+    "ext_input_tokens,ext_cached_input_tokens,ext_output_tokens,"
+    "gen_input_tokens,gen_cached_input_tokens,gen_output_tokens,"
+    "vrf_input_tokens,vrf_cached_input_tokens,vrf_output_tokens"
+)
+
+USAGE_DETAIL_COLUMNS_MIN = "created_at,estimated_cost_usd,user_ip_id"
+
 
 @dataclass(frozen=True)
 class DailyRow:
@@ -113,19 +123,20 @@ def _fetch_daily_stats_fallback(
             return [], str(ex)
         return rows, None
 
-    all_rows, pull_err = _pull_pages("created_at, estimated_cost_usd, ip_hash")
+    all_rows, pull_err = _pull_pages("created_at, estimated_cost_usd, user_ip_id")
     err_l = (pull_err or "").lower()
     if pull_err and (
         "estimated_cost_usd" in pull_err
         or "42703" in pull_err
+        or "user_ip_id" in pull_err
         or ("does not exist" in err_l and "column" in err_l)
     ):
-        all_rows, pull_err = _pull_pages("created_at, ip_hash")
+        all_rows, pull_err = _pull_pages("created_at, user_ip_id")
     if pull_err:
         return [], pull_err
 
     by_day: dict[date, dict[str, Any]] = defaultdict(
-        lambda: {"generations": 0, "cost": 0.0, "ips": set()}
+        lambda: {"generations": 0, "cost": 0.0, "visitors": set()}
     )
     for r in all_rows:
         ts = r.get("created_at")
@@ -143,16 +154,18 @@ def _fetch_daily_stats_fallback(
                 g["cost"] += float(c)
             except (TypeError, ValueError):
                 pass
-        ih = r.get("ip_hash")
-        if ih:
-            g["ips"].add(str(ih))
+        uid = r.get("user_ip_id")
+        if uid:
+            g["visitors"].add(str(uid))
+        else:
+            g["visitors"].add(f"anon:{hash(str(ts))}")
 
     out = [
         DailyRow(
             day=d,
             generations=b["generations"],
             total_cost_usd=float(b["cost"]),
-            distinct_visitors=len(b["ips"]),
+            distinct_visitors=len(b["visitors"]),
         )
         for d, b in sorted(by_day.items(), key=lambda x: x[0])
     ]
@@ -207,6 +220,51 @@ def hour_of_day_counts(rows: list[dict]) -> dict[int, int]:
         except Exception:
             continue
     return dict(sorted(c.items()))
+
+
+def fetch_usage_detail_rows(
+    start_utc: datetime,
+    end_utc_exclusive: datetime,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Raw usage rows for advanced analytics (mode/source, latency, tokens)."""
+    supabase = supabase_admin_client()
+    if supabase is None:
+        return [], "Supabase is not configured."
+
+    start_iso = start_utc.astimezone(timezone.utc).isoformat()
+    end_iso = end_utc_exclusive.astimezone(timezone.utc).isoformat()
+    page_size = 1000
+
+    def _pull(cols: str) -> tuple[list[dict[str, Any]], str | None]:
+        rows: list[dict[str, Any]] = []
+        page = 0
+        try:
+            while True:
+                q = (
+                    supabase.table(TABLE_NAME)
+                    .select(cols)
+                    .gte("created_at", start_iso)
+                    .lt("created_at", end_iso)
+                )
+                res = q.range(page * page_size, (page + 1) * page_size - 1).execute()
+                batch = res.data or []
+                rows.extend(batch)
+                if len(batch) < page_size:
+                    break
+                page += 1
+                if page > 500:
+                    break
+        except Exception as ex:
+            return [], str(ex)
+        return rows, None
+
+    all_rows, err = _pull(USAGE_DETAIL_COLUMNS)
+    err_l = (err or "").lower()
+    if err and ("42703" in err or "does not exist" in err_l or "user_ip_id" in err):
+        all_rows, err = _pull(USAGE_DETAIL_COLUMNS_MIN)
+    if err:
+        return [], err
+    return all_rows, None
 
 
 def period_bounds(

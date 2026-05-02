@@ -1,28 +1,85 @@
--- Quizzly Supabase schema: rate limiting + usage analytics.
--- Run new sections in Supabase → SQL Editor when you deploy or upgrade.
+-- Quizzly Supabase schema: user IPs (geo), usage rows, analytics RPCs.
+-- Apply in Supabase → SQL Editor (new projects: run in order).
 
 -- ---------------------------------------------------------------------------
--- Core table (one row per successful quiz generation)
+-- Client identity (one row per distinct IP seen)
+-- ---------------------------------------------------------------------------
+create table if not exists public.user_ip (
+  id uuid primary key default gen_random_uuid(),
+  ip text not null unique,
+  country text,
+  region text,
+  city text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists user_ip_ip_idx on public.user_ip (ip);
+
+comment on column public.user_ip.region is 'State / province (geo provider dependent)';
+
+-- ---------------------------------------------------------------------------
+-- One row per successful quiz generation
 -- ---------------------------------------------------------------------------
 create table if not exists public.quiz_generation_usage (
   id uuid primary key default gen_random_uuid(),
-  ip_hash text not null,
+  user_ip_id uuid references public.user_ip (id) on delete set null,
   created_at timestamptz not null default now(),
-  estimated_cost_usd numeric(14, 6)
+  estimated_cost_usd numeric(14, 6),
+  num_questions integer,
+  generation_mode text,
+  material_source text,
+  material_quantity integer,
+  upload_total_bytes bigint,
+  web_text_chars bigint,
+  ext_input_tokens bigint,
+  ext_cached_input_tokens bigint,
+  ext_output_tokens bigint,
+  gen_input_tokens bigint,
+  gen_cached_input_tokens bigint,
+  gen_output_tokens bigint,
+  vrf_input_tokens bigint,
+  vrf_cached_input_tokens bigint,
+  vrf_output_tokens bigint,
+  generation_duration_sec numeric(12, 3)
 );
 
-create index if not exists quiz_generation_usage_ip_hash_created_at_idx
-  on public.quiz_generation_usage (ip_hash, created_at desc);
+create index if not exists quiz_generation_usage_user_ip_id_created_at_idx
+  on public.quiz_generation_usage (user_ip_id, created_at desc);
 
 create index if not exists quiz_generation_usage_created_at_idx
   on public.quiz_generation_usage (created_at desc);
 
--- Add spend column on existing deployments (safe if already present)
-alter table public.quiz_generation_usage
-  add column if not exists estimated_cost_usd numeric(14, 6);
+create index if not exists quiz_generation_usage_generation_mode_idx
+  on public.quiz_generation_usage (generation_mode);
+
+create index if not exists quiz_generation_usage_material_source_idx
+  on public.quiz_generation_usage (material_source);
+
+-- Upgrades from older schemas (ip_hash, missing columns)
+alter table public.quiz_generation_usage add column if not exists user_ip_id uuid references public.user_ip (id) on delete set null;
+alter table public.quiz_generation_usage drop column if exists ip_hash;
+alter table public.quiz_generation_usage add column if not exists estimated_cost_usd numeric(14, 6);
+alter table public.quiz_generation_usage add column if not exists num_questions integer;
+alter table public.quiz_generation_usage add column if not exists generation_mode text;
+alter table public.quiz_generation_usage add column if not exists material_source text;
+alter table public.quiz_generation_usage add column if not exists material_quantity integer;
+alter table public.quiz_generation_usage add column if not exists upload_total_bytes bigint;
+alter table public.quiz_generation_usage add column if not exists web_text_chars bigint;
+alter table public.quiz_generation_usage add column if not exists ext_input_tokens bigint;
+alter table public.quiz_generation_usage add column if not exists ext_cached_input_tokens bigint;
+alter table public.quiz_generation_usage add column if not exists ext_output_tokens bigint;
+alter table public.quiz_generation_usage add column if not exists gen_input_tokens bigint;
+alter table public.quiz_generation_usage add column if not exists gen_cached_input_tokens bigint;
+alter table public.quiz_generation_usage add column if not exists gen_output_tokens bigint;
+alter table public.quiz_generation_usage add column if not exists vrf_input_tokens bigint;
+alter table public.quiz_generation_usage add column if not exists vrf_cached_input_tokens bigint;
+alter table public.quiz_generation_usage add column if not exists vrf_output_tokens bigint;
+alter table public.quiz_generation_usage add column if not exists generation_duration_sec numeric(12, 3);
+
+drop index if exists quiz_generation_usage_ip_hash_created_at_idx;
 
 -- ---------------------------------------------------------------------------
--- Daily aggregates for the analytics dashboard (optional but recommended)
+-- Daily aggregates for the analytics dashboard
 -- ---------------------------------------------------------------------------
 create or replace function public.quizzly_usage_by_day(
   p_start timestamptz,
@@ -41,7 +98,7 @@ as $$
     (u.created_at at time zone 'UTC')::date as day,
     count(*)::bigint as generations,
     coalesce(sum(u.estimated_cost_usd), 0)::numeric as total_cost_usd,
-    count(distinct u.ip_hash)::bigint as distinct_visitors
+    count(distinct coalesce(u.user_ip_id::text, u.id::text))::bigint as distinct_visitors
   from public.quiz_generation_usage u
   where u.created_at >= p_start and u.created_at < p_end
   group by 1
