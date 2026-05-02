@@ -1,0 +1,11 @@
+-- Quizzly Supabase schema (minimal): daily quiz-generation rate limit only.
+-- Run this in Supabase → SQL Editor before deploying with SUPABASE_* secrets.
+
+create table if not exists public.quiz_generation_usage (
+  id uuid primary key default gen_random_uuid(),
+  ip_hash text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists quiz_generation_usage_ip_hash_created_at_idx
+  on public.quiz_generation_usage (ip_hash, created_at desc);

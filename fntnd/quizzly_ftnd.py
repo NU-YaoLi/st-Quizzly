@@ -25,6 +25,12 @@ from bknd.quizzly_bknd_upldprcs import (
     pptx_to_pdf,
     pseudo_pages_from_web_text,
 )
+from bknd.quizzly_rate_limit import (
+    check_daily_generation_allowed,
+    get_client_ip,
+    hash_client_ip,
+    record_successful_generation,
+)
 
 try:
     # Streamlit Cloud can temporarily run a stale build; make this import robust.
@@ -498,6 +504,11 @@ def main():
         workflow_slot = st.container()
 
         if generate_btn:
+            _rl = check_daily_generation_allowed()
+            if not _rl.allowed:
+                st.error(_rl.message)
+                st.stop()
+
             st.session_state["workflow_status_label"] = None
             st.session_state["workflow_status_lines"] = []
             st.session_state["workflow_running"] = True
@@ -624,6 +635,14 @@ def main():
                     workflow_status_label=st.session_state.get("workflow_status_label"),
                     workflow_status_lines=st.session_state.get("workflow_status_lines") or [],
                 )
+
+                _rl_err = record_successful_generation(hash_client_ip(get_client_ip()))
+                if _rl_err:
+                    st.session_state["workflow_status_lines"].append(
+                        f"Warning: could not record daily usage for rate limit ({_rl_err})."
+                    )
+                    if debug_enabled:
+                        st.warning(f"Could not record daily usage: {_rl_err}")
 
                 elapsed_time = time.time() - start_time
                 st.session_state["generation_time"] = elapsed_time

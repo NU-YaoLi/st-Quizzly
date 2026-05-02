@@ -1,6 +1,14 @@
 MIN_QUESTIONS = 3
 MAX_WEB_URL_SLOTS = 5
 
+# Supabase-backed daily generation cap (per salted IP hash, UTC day).
+DAILY_GENERATION_LIMIT = 3
+
+# Supabase project URL (public). Keys stay in Streamlit secrets only:
+# - SUPABASE_ANON_KEY — optional / reserved for future client-side Supabase use
+# - SUPABASE_SERVICE_ROLE_KEY — required for server-side rate limit (insert/select)
+SUPABASE_URL = "https://udbxyrssdjndmvuakhgb.supabase.co"
+
 # -------------------
 # Model configuration
 # -------------------
