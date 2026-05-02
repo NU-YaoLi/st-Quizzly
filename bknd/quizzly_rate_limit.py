@@ -197,9 +197,22 @@ def record_successful_generation(
     if supabase is None:
         return None
 
-    row: dict = {"ip_hash": ip_hash, "estimated_cost_usd": estimated_cost_usd}
+    row_full: dict = {"ip_hash": ip_hash, "estimated_cost_usd": estimated_cost_usd}
+    row_min: dict = {"ip_hash": ip_hash}
     try:
-        supabase.table(TABLE_NAME).insert(row).execute()
+        supabase.table(TABLE_NAME).insert(row_full).execute()
+        return None
     except Exception as e:
+        msg = f"{type(e).__name__}: {e!s}"
+        # DB missing `estimated_cost_usd` until migration is applied — keep rate-limit inserts working.
+        if (
+            "estimated_cost_usd" in msg
+            or "42703" in msg
+            or ("does not exist" in msg.lower() and "column" in msg.lower())
+        ):
+            try:
+                supabase.table(TABLE_NAME).insert(row_min).execute()
+                return None
+            except Exception as e2:
+                return str(e2)
         return str(e)
-    return None

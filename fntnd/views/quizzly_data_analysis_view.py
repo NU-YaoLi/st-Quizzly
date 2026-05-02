@@ -4,6 +4,7 @@ Admin-style usage dashboard: generations and estimated spend across all visitors
 
 from __future__ import annotations
 
+import os
 from datetime import date, datetime, timezone
 
 import pandas as pd
@@ -18,6 +19,18 @@ from bknd.quizzly_analytics import (
     hour_of_day_counts,
     period_bounds,
 )
+
+_SESSION_UNLOCK = "quizzly_analytics_unlocked"
+
+
+def _analytics_password() -> str:
+    try:
+        v = st.secrets.get("ANALYTICS_PASSWORD")
+        if v is not None and str(v).strip() != "":
+            return str(v).strip()
+    except Exception:
+        pass
+    return (os.environ.get("ANALYTICS_PASSWORD") or "123").strip()
 
 
 @st.cache_data(ttl=90, show_spinner="Loading daily aggregates…")
@@ -36,10 +49,29 @@ def _cached_raw_events(ts_start: float, ts_end: float):
 
 def render_data_analysis_view() -> None:
     st.title("Usage & cost analytics")
+
+    if not st.session_state.get(_SESSION_UNLOCK):
+        st.caption("Admin only — enter password to view aggregate usage and estimated spend.")
+        with st.form("quizzly_analytics_auth", clear_on_submit=False):
+            pw = st.text_input("Password", type="password", autocomplete="off")
+            submit = st.form_submit_button("Unlock", type="primary", use_container_width=True)
+        if submit:
+            if (pw or "").strip() == _analytics_password():
+                st.session_state[_SESSION_UNLOCK] = True
+                st.rerun()
+            else:
+                st.error("Incorrect password.")
+        return
+
     st.caption(
         "Estimated OpenAI spend (from in-app model pricing) and quiz-generation counts, "
         "aggregated across **all** visitors. Times are **UTC**."
     )
+    c_lock, _ = st.columns([1, 3])
+    with c_lock:
+        if st.button("Lock", help="Clear analytics access for this browser session"):
+            st.session_state.pop(_SESSION_UNLOCK, None)
+            st.rerun()
 
     period = st.selectbox(
         "Time range",

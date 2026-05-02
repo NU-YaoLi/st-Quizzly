@@ -88,27 +88,41 @@ def _fetch_daily_stats_fallback(
     start_iso = start_utc.astimezone(timezone.utc).isoformat()
     end_iso = end_utc_exclusive.astimezone(timezone.utc).isoformat()
 
-    all_rows: list[dict] = []
-    page = 0
     page_size = 1000
-    try:
-        while True:
-            q = (
-                supabase.table(TABLE_NAME)
-                .select("created_at, estimated_cost_usd, ip_hash")
-                .gte("created_at", start_iso)
-                .lt("created_at", end_iso)
-            )
-            res = q.range(page * page_size, (page + 1) * page_size - 1).execute()
-            batch = res.data or []
-            all_rows.extend(batch)
-            if len(batch) < page_size:
-                break
-            page += 1
-            if page > 1000:
-                break
-    except Exception as e:
-        return [], str(e)
+
+    def _pull_pages(select_cols: str) -> tuple[list[dict], str | None]:
+        rows: list[dict] = []
+        page = 0
+        try:
+            while True:
+                q = (
+                    supabase.table(TABLE_NAME)
+                    .select(select_cols)
+                    .gte("created_at", start_iso)
+                    .lt("created_at", end_iso)
+                )
+                res = q.range(page * page_size, (page + 1) * page_size - 1).execute()
+                batch = res.data or []
+                rows.extend(batch)
+                if len(batch) < page_size:
+                    break
+                page += 1
+                if page > 1000:
+                    break
+        except Exception as ex:
+            return [], str(ex)
+        return rows, None
+
+    all_rows, pull_err = _pull_pages("created_at, estimated_cost_usd, ip_hash")
+    err_l = (pull_err or "").lower()
+    if pull_err and (
+        "estimated_cost_usd" in pull_err
+        or "42703" in pull_err
+        or ("does not exist" in err_l and "column" in err_l)
+    ):
+        all_rows, pull_err = _pull_pages("created_at, ip_hash")
+    if pull_err:
+        return [], pull_err
 
     by_day: dict[date, dict[str, Any]] = defaultdict(
         lambda: {"generations": 0, "cost": 0.0, "ips": set()}
