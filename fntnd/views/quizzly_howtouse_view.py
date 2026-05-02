@@ -1,11 +1,33 @@
 import streamlit as st
 
-from quizzly_config import MAX_QUESTIONS_CAP, MAX_WEB_URL_SLOTS, MIN_QUESTIONS
+from quizzly_config import (
+    DAILY_GENERATION_LIMIT,
+    MAX_QUESTIONS_CAP,
+    MAX_WEB_URL_SLOTS,
+    MIN_QUESTIONS,
+)
 
 
 def render_how_to_use_view() -> None:
     st.title("How to Use Quizzly")
     st.caption("A quick walkthrough, plus rules and limitations.")
+
+    st.markdown(
+        f"""
+### What is Quizzly?
+
+**Quizzly** is an automated quiz generator for serious learners. You supply reading material 
+(files or web pages); it builds multiple-choice questions aligned with **Bloom’s taxonomy**, 
+runs safety checks on model output, and optionally scores **verification quality** so you get 
+a quiz you can actually trust—not a generic trivia sheet.
+
+### Fair use: daily generation limit
+
+To keep costs sustainable for everyone, **Quiz generation is limited to {DAILY_GENERATION_LIMIT} successful runs per day per visitor** 
+(based on network identity). The limit **resets at midnight UTC** each day. If you hit the cap, 
+come back after the reset—or focus on the quiz you already generated.
+"""
+    )
 
     st.divider()
 
@@ -87,6 +109,7 @@ Notes:
 
 ### Rules & limitations (important)
 
+- **Daily generation cap**: up to **{DAILY_GENERATION_LIMIT}** successful **Generate & Verify Quiz** runs per day per visitor (resets midnight UTC).
 - **One source type per run**: use either **Upload files** *or* **Website links**, not both.
 - **URL limit**: up to **{MAX_WEB_URL_SLOTS}** URLs.
 - **Question cap**: hard cap is **{MAX_QUESTIONS_CAP}** questions (even if materials are large).

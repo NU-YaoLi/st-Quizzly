@@ -49,6 +49,8 @@ class TestDailyGenerationRateLimit(unittest.TestCase):
             r = check_daily_generation_allowed()
             self.assertFalse(r.allowed)
             self.assertIn("limit reached", r.message.lower())
+            self.assertIn("try again in", r.message.lower())
+            self.assertIn("midnight utc", r.message.lower())
 
     def test_db_error_is_not_allowed(self):
         with patch("bknd.quizzly_rate_limit.rate_limit_disabled", return_value=False), patch(

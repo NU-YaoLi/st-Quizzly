@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import streamlit as st
 
 from quizzly_config import DAILY_GENERATION_LIMIT, SUPABASE_URL
@@ -98,6 +98,23 @@ def utc_day_start() -> datetime:
     return now.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
+def utc_next_midnight() -> datetime:
+    return utc_day_start() + timedelta(days=1)
+
+
+def format_time_until_next_utc_midnight() -> str:
+    """Human-readable countdown until the next UTC midnight (rate limit reset)."""
+    now = datetime.now(timezone.utc)
+    secs = max(0, int((utc_next_midnight() - now).total_seconds()))
+    h, rem = divmod(secs, 3600)
+    m, s = divmod(rem, 60)
+    if h > 0:
+        return f"{h} hour{'s' if h != 1 else ''} {m} minute{'s' if m != 1 else ''}"
+    if m > 0:
+        return f"{m} minute{'s' if m != 1 else ''} {s} second{'s' if s != 1 else ''}"
+    return f"{s} second{'s' if s != 1 else ''}"
+
+
 def count_generations_today(ip_hash: str) -> tuple[int | None, str | None]:
     """
     Returns (count, error_message). count is None if the query failed.
@@ -149,11 +166,12 @@ def check_daily_generation_allowed() -> RateLimitResult:
         )
 
     if used is not None and used >= DAILY_GENERATION_LIMIT:
+        remaining = format_time_until_next_utc_midnight()
         return RateLimitResult(
             False,
             message=(
                 f"Daily quiz generation limit reached ({DAILY_GENERATION_LIMIT} per day, UTC). "
-                "Try again after midnight UTC."
+                f"Try again in {remaining} (resets at midnight UTC)."
             ),
             used_today=used,
         )
