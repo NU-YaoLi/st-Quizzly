@@ -25,12 +25,16 @@ def _load_top_level_module(name: str, file_path: Path) -> None:
     if not file_path.is_file():
         raise ImportError(f"Required file missing: {path_str}")
     loader = SourceFileLoader(name, path_str)
-    spec = importlib.util.spec_from_loader(name, loader, origin=path_str)
+    spec = importlib.util.spec_from_file_location(name, path_str, loader=loader)
     if spec is None:
         raise ImportError(f"Could not create spec for {name} from {path_str}")
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
-    loader.exec_module(mod)
+    try:
+        loader.exec_module(mod)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
 
 
 def _verify_quizzly_config() -> None:
@@ -52,6 +56,19 @@ def _verify_quizzly_config() -> None:
     )
     missing = [n for n in required if not hasattr(mod, n)]
     if missing:
+        # One more attempt: import via normal import machinery (sometimes more stable on Cloud reloads).
+        try:
+            sys.modules.pop("quizzly_config", None)
+            importlib.invalidate_caches()
+            mod2 = importlib.import_module("quizzly_config")
+            missing2 = [n for n in required if not hasattr(mod2, n)]
+            if not missing2:
+                sys.modules["quizzly_config"] = mod2
+                return
+            mod = mod2
+            missing = missing2
+        except Exception:
+            pass
         raise ImportError(
             f"quizzly_config from {getattr(mod, '__file__', '?')} is missing names {missing}. "
             "If this is Streamlit Cloud, confirm quizzly_config.py is committed and not overwritten."
