@@ -41,7 +41,10 @@ create table if not exists public.quiz_generation_usage (
   vrf_input_tokens bigint,
   vrf_cached_input_tokens bigint,
   vrf_output_tokens bigint,
-  generation_duration_sec numeric(12, 3)
+  generation_duration_sec numeric(12, 3),
+  country text,
+  region text,
+  city text
 );
 
 create index if not exists quiz_generation_usage_user_ip_id_created_at_idx
@@ -55,11 +58,6 @@ create index if not exists quiz_generation_usage_generation_mode_idx
 
 create index if not exists quiz_generation_usage_material_source_idx
   on public.quiz_generation_usage (material_source);
-
--- Snapshot geo at generation time (denormalized; user_ip is canonical / refreshed)
-alter table public.quiz_generation_usage add column if not exists country text;
-alter table public.quiz_generation_usage add column if not exists region text;
-alter table public.quiz_generation_usage add column if not exists city text;
 
 -- ---------------------------------------------------------------------------
 -- Daily aggregates for the analytics dashboard

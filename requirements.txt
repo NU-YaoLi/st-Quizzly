@@ -12,3 +12,4 @@ pillow
 supabase
 pandas
 plotly
+streamlit-javascript

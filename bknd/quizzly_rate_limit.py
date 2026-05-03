@@ -76,6 +76,55 @@ def _pick_first_global_from_xff(xff: str) -> str | None:
     return None
 
 
+def _pick_last_global_from_xff(xff: str) -> str | None:
+    """Some chains list the client rightmost; try if left-to-right found no global."""
+    parts = [_normalize_ip_token(p) for p in xff.split(",")]
+    for p in reversed(parts):
+        if p and _is_global_public_ip(p):
+            return p
+    return None
+
+
+def _merged_x_forwarded_for(headers) -> str:
+    """Join every ``X-Forwarded-For`` segment (proxies may append multiple headers)."""
+    chunks: list[str] = []
+    getter = getattr(headers, "get_all", None)
+    if callable(getter):
+        try:
+            chunks.extend(getter("X-Forwarded-For"))
+        except Exception:
+            pass
+    else:
+        v = ""
+        try:
+            v = headers.get("X-Forwarded-For", "") if hasattr(headers, "get") else ""
+        except Exception:
+            pass
+        if v:
+            chunks.append(str(v))
+    return ",".join(c.strip() for c in chunks if c and str(c).strip())
+
+
+def _header_raw(headers, *names: str) -> str:
+    """First non-empty header among ``names`` (case handled by Streamlit's normalized mapping)."""
+    for name in names:
+        try:
+            if hasattr(headers, "get"):
+                v = headers.get(name)
+            else:
+                v = headers[name]
+        except Exception:
+            v = None
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    return ""
+
+
+def _optional_custom_ip_header_name() -> str | None:
+    """Deployer can set ``CLIENT_IP_HEADER`` in secrets or env if their proxy uses a custom name."""
+    return _first_secret("CLIENT_IP_HEADER", "QUIZZLY_CLIENT_IP_HEADER")
+
+
 def rate_limit_disabled() -> bool:
     """When True, daily generation caps are not enforced. Does not skip `quiz_generation_usage` logging."""
     if os.environ.get("RATE_LIMIT_DISABLED", "").strip() in ("1", "true", "yes"):
@@ -88,50 +137,93 @@ def get_client_ip() -> str:
     """
     Best-effort client IP for analytics / geo.
 
-    Streamlit / reverse proxies sometimes expose a **private** hop (e.g. ``192.168.x``) in
-    ``st.context.ip_address`` or as the **first** ``X-Forwarded-For`` entry. We prefer the
-    first **globally routable** address in ``X-Forwarded-For`` when the direct value is not
-    public, so remote users on Streamlit Cloud are more likely to get a public IP for geo.
+    Primary strategy (Streamlit Cloud friendly):
+    - Ask the **browser** for its public IP via `https://api.ipify.org?format=json`.
+
+    ``st.context.ip_address`` is often a **private** hop when Streamlit runs behind a proxy
+    (e.g. Streamlit Community Cloud). We therefore prefer, in order:
+
+    1. Optional deployer header name from ``CLIENT_IP_HEADER`` secret / env.
+    2. CDN / LB headers that usually carry the original client: ``CF-Connecting-IP``,
+       ``True-Client-IP``, ``X-Real-IP``, ``X-Client-IP``, ``Fastly-Client-IP``,
+       ``Fly-Client-IP``, ``X-Amzn-Source-IP``.
+    3. Any **globally routable** address in the full ``X-Forwarded-For`` chain (including
+       every appended header via ``get_all``), scanning left-to-right then right-to-left.
+    4. ``st.context.ip_address`` only if it is already a global address.
+    5. First token of ``X-Forwarded-For``, then private ``ip_address``, else ``unknown``.
+
+    If the platform never forwards the visitor's public IP to the app (common on some hosts),
+    you will only see RFC1918 addresses — that is an infrastructure limit, not fixable in Python.
     """
     try:
+        # Browser-side public IP (works when server-side headers are private only).
+        # Cache per session so we don't re-fetch on every rerun.
+        cached = st.session_state.get("_quizzly_public_ip_js")
+        if isinstance(cached, str) and cached.strip():
+            return cached.strip()
+        try:
+            from streamlit_javascript import st_javascript  # type: ignore
+
+            script = 'await fetch("https://api.ipify.org?format=json").then(r => r.json())'
+            res = st_javascript(script)
+            if isinstance(res, dict) and res.get("ip"):
+                ip_js = str(res["ip"]).strip()
+                if ip_js:
+                    st.session_state["_quizzly_public_ip_js"] = ip_js
+                    return ip_js
+        except Exception:
+            # If the component isn't available yet (or blocked), fall back to server-side attempts.
+            pass
+
         ctx = getattr(st, "context", None)
         if ctx is None:
             return "unknown"
 
-        headers = getattr(ctx, "headers", None) or {}
-        xff = (headers.get("X-Forwarded-For") or headers.get("x-forwarded-for") or "").strip()
+        headers = getattr(ctx, "headers", None)
+        if not headers:
+            return "unknown"
 
-        ip_direct = getattr(ctx, "ip_address", None)
-        if ip_direct is not None:
-            ip = str(ip_direct).strip()
-            if ip and ip.lower() != "none" and _is_global_public_ip(ip):
-                return ip
-            if ip and ip.lower() != "none" and not _is_global_public_ip(ip) and xff:
-                g = _pick_first_global_from_xff(xff)
-                if g:
-                    return g
-                return ip
+        custom = _optional_custom_ip_header_name()
+        if custom:
+            raw = _header_raw(headers, custom)
+            if raw:
+                v = _normalize_ip_token(raw.split(",")[0])
+                if v:
+                    return v
 
+        # Single-hop headers commonly set by CDNs / reverse proxies to the real client.
+        for raw in (
+            _header_raw(headers, "CF-Connecting-IP"),
+            _header_raw(headers, "True-Client-IP"),
+            _header_raw(headers, "X-Real-IP"),
+            _header_raw(headers, "X-Client-IP"),
+            _header_raw(headers, "Fastly-Client-IP"),
+            _header_raw(headers, "Fly-Client-IP"),
+            _header_raw(headers, "X-Amzn-Source-IP"),
+        ):
+            if raw:
+                v = _normalize_ip_token(raw.split(",")[0])
+                if v:
+                    return v
+
+        xff = _merged_x_forwarded_for(headers)
         if xff:
-            g = _pick_first_global_from_xff(xff)
+            g = _pick_first_global_from_xff(xff) or _pick_last_global_from_xff(xff)
             if g:
                 return g
             first = _normalize_ip_token(xff.split(",")[0])
             if first:
                 return first
 
+        ip_direct = getattr(ctx, "ip_address", None)
         if ip_direct is not None:
             ip = str(ip_direct).strip()
             if ip and ip.lower() != "none":
+                if _is_global_public_ip(ip):
+                    return ip
                 return ip
 
-        if not headers:
-            return "unknown"
-        rip = (headers.get("X-Real-IP") or headers.get("x-real-ip") or "").strip()
-        if rip:
-            r = _normalize_ip_token(rip)
-            if r:
-                return r
+        return "unknown"
     except Exception:
         pass
     return "unknown"
