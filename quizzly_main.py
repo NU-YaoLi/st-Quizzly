@@ -1,3 +1,12 @@
+import sys
+from pathlib import Path
+
+# Ensure repo root is on sys.path (Streamlit Cloud cwd can differ from the entrypoint folder).
+_root = Path(__file__).resolve().parent
+_root_str = str(_root)
+if _root_str not in sys.path:
+    sys.path.insert(0, _root_str)
+
 import streamlit as st
 
 st.set_page_config(page_title="Quizzly", page_icon="📖", layout="wide")
