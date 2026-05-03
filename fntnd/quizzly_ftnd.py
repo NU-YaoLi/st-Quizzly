@@ -111,7 +111,29 @@ def main():
         from streamlit_javascript import st_javascript  # type: ignore
 
         if not st.session_state.get("_quizzly_public_ip_js"):
-            script = 'await fetch("https://api.ipify.org?format=json").then(r => r.json())'
+            # Try multiple IP endpoints (some are blocked in certain regions).
+            script = """
+                const endpoints = [
+                  "https://api64.ipify.org?format=json",
+                  "https://ifconfig.co/json",
+                  "https://ipwho.is/?output=json",
+                  // Often blocked in some regions (e.g. parts of China); keep last as best-effort.
+                  "https://api.ipify.org?format=json",
+                ];
+                async function firstIp() {
+                  for (const url of endpoints) {
+                    try {
+                      const r = await fetch(url, { cache: "no-store" });
+                      if (!r.ok) continue;
+                      const j = await r.json();
+                      const ip = (j && (j.ip || j.IP || j.query)) ? String(j.ip || j.IP || j.query).trim() : "";
+                      if (ip) return { ip };
+                    } catch (e) {}
+                  }
+                  return null;
+                }
+                await firstIp();
+            """
             res = st_javascript(script)
             if isinstance(res, dict) and res.get("ip"):
                 st.session_state["_quizzly_public_ip_js"] = str(res["ip"]).strip()

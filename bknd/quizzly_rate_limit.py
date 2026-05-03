@@ -174,7 +174,7 @@ def get_client_ip() -> str:
             raw = _header_raw(headers, custom)
             if raw:
                 v = _normalize_ip_token(raw.split(",")[0])
-                if v:
+                if v and _is_global_public_ip(v):
                     return v
 
         # Single-hop headers commonly set by CDNs / reverse proxies to the real client.
@@ -189,7 +189,7 @@ def get_client_ip() -> str:
         ):
             if raw:
                 v = _normalize_ip_token(raw.split(",")[0])
-                if v:
+                if v and _is_global_public_ip(v):
                     return v
 
         xff = _merged_x_forwarded_for(headers)
@@ -197,9 +197,7 @@ def get_client_ip() -> str:
             g = _pick_first_global_from_xff(xff) or _pick_last_global_from_xff(xff)
             if g:
                 return g
-            first = _normalize_ip_token(xff.split(",")[0])
-            if first:
-                return first
+            # Don't fall back to private XFF tokens; they are usually proxy hops.
 
         ip_direct = getattr(ctx, "ip_address", None)
         if ip_direct is not None:
@@ -207,7 +205,8 @@ def get_client_ip() -> str:
             if ip and ip.lower() != "none":
                 if _is_global_public_ip(ip):
                     return ip
-                return ip
+                # Private hop is not useful for analytics/geo; prefer unknown.
+                return "unknown"
 
         return "unknown"
     except Exception:
