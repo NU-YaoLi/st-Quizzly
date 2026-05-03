@@ -7,6 +7,9 @@ _root_str = str(_root)
 if _root_str not in sys.path:
     sys.path.insert(0, _root_str)
 
+# Fail fast with ImportError if this file is missing (Cloud cwd issues are handled via sys.path above).
+import quizzly_config  # noqa: F401
+
 import streamlit as st
 
 st.set_page_config(page_title="Quizzly", page_icon="📖", layout="wide")

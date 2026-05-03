@@ -161,7 +161,7 @@ def render_data_analysis_view() -> None:
         st.caption("Admin only — enter password to view aggregate usage and estimated spend.")
         with st.form("quizzly_analytics_auth", clear_on_submit=False):
             pw = st.text_input("Password", type="password", autocomplete="off")
-            submit = st.form_submit_button("Unlock", type="primary", use_container_width=True)
+            submit = st.form_submit_button("Unlock", type="primary", width="stretch")
         if submit:
             if (pw or "").strip() == _analytics_password():
                 st.session_state[_SESSION_UNLOCK] = True
@@ -268,6 +268,7 @@ def render_data_analysis_view() -> None:
             if meta_err:
                 st.warning(meta_err)
             udf = _build_visitor_table(dr, ordered, ip_meta)
+            udf_active = udf[udf["Generations"] > 0].copy()
             tgen = int(udf["Generations"].sum())
             tspend = float(udf["Total est. spend (USD)"].sum())
             nu = len(udf)
@@ -279,8 +280,8 @@ def render_data_analysis_view() -> None:
 
             if "Country" in udf.columns:
                 top_c = (
-                    udf[udf["Country"] != "—"]["Country"].value_counts().head(12)
-                    if len(udf)
+                    udf_active[udf_active["Country"] != "—"]["Country"].value_counts().head(12)
+                    if len(udf_active)
                     else pd.Series(dtype=int)
                 )
                 if len(top_c):
@@ -294,15 +295,26 @@ def render_data_analysis_view() -> None:
                         yaxis_title="Visitor rows",
                         margin=dict(l=10, r=10, t=48, b=10),
                     )
-                    st.plotly_chart(fig_cy, use_container_width=True)
+                    st.plotly_chart(fig_cy, width="stretch")
 
             st.subheader("Visitor table")
-            st.dataframe(
-                udf,
-                use_container_width=True,
-                hide_index=True,
-                height=_DA_TABLE_HEIGHT_PX,
-            )
+            n_hidden = int(len(udf) - len(udf_active))
+            if udf_active.empty:
+                st.info(
+                    "No visitors had a completed generation in this window — "
+                    f"{len(udf):,} IP(s) with zero activity are not shown in the table."
+                )
+            else:
+                st.dataframe(
+                    udf_active,
+                    width="stretch",
+                    hide_index=True,
+                    height=_DA_TABLE_HEIGHT_PX,
+                )
+                if n_hidden > 0:
+                    st.caption(
+                        f"{n_hidden:,} visitor IP(s) with **0** generations in this window are hidden."
+                    )
 
     with tab_quiz:
         st.markdown(
@@ -384,7 +396,7 @@ def render_data_analysis_view() -> None:
             st.subheader("All generations (filtered)")
             st.dataframe(
                 quiz_show.sort_values("Created (UTC)", ascending=False),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 height=_DA_TABLE_HEIGHT_PX,
             )
@@ -402,7 +414,7 @@ def render_data_analysis_view() -> None:
                     grp.rename(
                         columns={"generation_mode": "Mode", "material_source": "Material", "avg_cost": "Avg cost"}
                     ),
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                     height=_DA_TABLE_HEIGHT_PX,
                 )
@@ -415,7 +427,7 @@ def render_data_analysis_view() -> None:
                     yaxis_title="Count",
                     xaxis_tickangle=-25,
                 )
-                st.plotly_chart(fig_ms, use_container_width=True)
+                st.plotly_chart(fig_ms, width="stretch")
 
                 lat = pd.to_numeric(ddf_f["generation_duration_sec"], errors="coerce").dropna()
                 if len(lat):
@@ -436,7 +448,7 @@ def render_data_analysis_view() -> None:
                         yaxis_title="Count",
                         height=380,
                     )
-                    st.plotly_chart(fig_l, use_container_width=True)
+                    st.plotly_chart(fig_l, width="stretch")
 
     with tab_cost:
         st.markdown("**Cost & volume** — daily spend, cumulative trend, and hourly activity.")
@@ -493,7 +505,7 @@ def render_data_analysis_view() -> None:
             fig.update_layout(height=640, showlegend=False, margin=dict(l=10, r=10, t=40, b=10))
             fig.update_yaxes(title_text="Count", row=1, col=1)
             fig.update_yaxes(title_text="USD", row=2, col=1)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
             df_c = df_daily.copy()
             df_c["Cumulative spend (USD)"] = df_c["Est. spend (USD)"].cumsum()
@@ -516,7 +528,7 @@ def render_data_analysis_view() -> None:
                 yaxis_title="USD",
                 xaxis_title="Day (UTC)",
             )
-            st.plotly_chart(fig_c, use_container_width=True)
+            st.plotly_chart(fig_c, width="stretch")
 
             raw_ev, herr = _cached_raw_events(ts0, ts1, _nonce)
             if herr:
@@ -543,7 +555,7 @@ def render_data_analysis_view() -> None:
                         yaxis_title="Generations",
                         margin=dict(l=10, r=10, t=40, b=10),
                     )
-                    st.plotly_chart(fig_h, use_container_width=True)
+                    st.plotly_chart(fig_h, width="stretch")
 
             st.subheader("Daily breakdown")
             show_df = df_daily.drop(columns=["Cumulative spend (USD)"], errors="ignore").sort_values(
@@ -551,7 +563,7 @@ def render_data_analysis_view() -> None:
             )
             st.dataframe(
                 show_df,
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 height=_DA_TABLE_HEIGHT_PX,
             )

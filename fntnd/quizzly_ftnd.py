@@ -131,18 +131,22 @@ def main():
         st.session_state["_error_notebook_history"] = load_error_history(client_id, csig=csig)
         st.session_state["_error_history_loaded"] = True
 
-    # API Key Check via Streamlit Secrets
-    if "OPENAI_API_KEY" not in st.secrets:
+    # API Key Check via Streamlit Secrets (avoid KeyError if secrets layout differs)
+    try:
+        api_key = (st.secrets.get("OPENAI_API_KEY") or "").strip()
+    except Exception:
+        api_key = ""
+    if not api_key:
         st.error("⚠️ Please set the OPENAI_API_KEY in the Streamlit secrets.")
         return
 
     # Set it as an environment variable so LangChain and OpenAI clients pick it up automatically
-    os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+    os.environ["OPENAI_API_KEY"] = api_key
 
     # --- Sidebar: Upload & Settings ---
     with st.sidebar:
         if view in _QUIZ_AUX_VIEWS:
-            if st.button("← Back to Quiz", use_container_width=True):
+            if st.button("← Back to Quiz", width="stretch"):
                 set_query_params(
                     client=client_id,
                     quiz=quiz_id,
@@ -151,7 +155,7 @@ def main():
                 )
                 st.rerun()
         else:
-            if st.button("❓ How to use", use_container_width=True):
+            if st.button("❓ How to use", width="stretch"):
                 set_query_params(
                     client=client_id,
                     quiz=quiz_id,
@@ -160,7 +164,7 @@ def main():
                     sig=sig or sign_state(client_id, quiz_id),
                 )
                 st.rerun()
-            if st.button("📒 Error Notebook", use_container_width=True):
+            if st.button("📒 Error Notebook", width="stretch"):
                 set_query_params(
                     client=client_id,
                     quiz=quiz_id,
@@ -169,7 +173,7 @@ def main():
                     sig=sig or sign_state(client_id, quiz_id),
                 )
                 st.rerun()
-            if st.button("📊 Data analysis", use_container_width=True):
+            if st.button("📊 Data analysis", width="stretch"):
                 set_query_params(
                     client=client_id,
                     quiz=quiz_id,
@@ -268,7 +272,7 @@ def main():
                         type="secondary",
                         disabled=(n_slots <= 1),
                         help="Remove this URL field",
-                        use_container_width=True,
+                        width="stretch",
                     ):
                         st.session_state[PENDING_REMOVE_URL_INDEX] = i
                         st.rerun()
@@ -992,7 +996,7 @@ def main():
 
                 _btn_l, _btn_m, _btn_r = st.columns([1, 1, 1])
                 with _btn_m:
-                    submitted = st.form_submit_button("Submit Answers", use_container_width=True)
+                    submitted = st.form_submit_button("Submit Answers", width="stretch")
 
                 if submitted:
                     quiz_id_now = (qp.get("quiz") or "").strip()
@@ -1076,7 +1080,7 @@ def main():
             with title_col:
                 st.subheader("Quiz Score")
             with redo_col:
-                redo_clicked = st.button("Redo Quiz", use_container_width=True)
+                redo_clicked = st.button("Redo Quiz", width="stretch")
 
             if redo_clicked:
                 # Reset quiz-taking state but keep the generated quiz + verification report.

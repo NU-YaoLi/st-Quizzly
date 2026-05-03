@@ -27,7 +27,7 @@ def render_error_notebook_view(*, client_id: str, quiz_id: str) -> None:
     with col_a:
         st.metric("Total mistakes saved", len(history))
     with col_b:
-        if st.button("Clear ALL history", type="secondary", use_container_width=True):
+        if st.button("Clear ALL history", type="secondary", width="stretch"):
             save_error_history(client_id, [])
             st.session_state["_error_notebook_history"] = []
             st.success("History cleared.")
