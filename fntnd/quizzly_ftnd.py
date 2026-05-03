@@ -82,10 +82,21 @@ from fntnd.quizzly_state import (
     sign_client,
     sign_state,
 )
-from fntnd.views.quizzly_current_quiz_mistakes import render_current_quiz_mistakes
-from fntnd.views.quizzly_data_analysis_view import render_data_analysis_view
-from fntnd.views.quizzly_error_notebook_view import render_error_notebook_view
-from fntnd.views.quizzly_howtouse_view import render_how_to_use_view
+
+# Streamlit Community Cloud + Python 3.14 can intermittently fail dotted imports during reload.
+# Avoid importing view modules at import-time; resolve them lazily when needed.
+import importlib
+
+
+def _lazy_view_func(module_name: str, func_name: str):
+    try:
+        mod = importlib.import_module(module_name)
+        fn = getattr(mod, func_name, None)
+        if callable(fn):
+            return fn, None
+        return None, f"{module_name}.{func_name} not found"
+    except Exception as e:
+        return None, f"{type(e).__name__}: {e!s}"
 
 # Sidebar “utility” views: hide materials UI; quiz state stays in session.
 _QUIZ_AUX_VIEWS = frozenset({"howto", "errors", "analytics"})
@@ -541,17 +552,35 @@ def main():
 
     # --- How-to-use view ---
     if view == "howto":
-        render_how_to_use_view()
+        fn, verr = _lazy_view_func("fntnd.views.quizzly_howtouse_view", "render_how_to_use_view")
+        if fn:
+            fn()
+        else:
+            st.error("Could not load the How-to view.")
+            if verr:
+                st.caption(verr)
         return
 
     # --- Error Notebook view (all-time history) ---
     if view == "errors":
-        render_error_notebook_view(client_id=client_id, quiz_id=quiz_id)
+        fn, verr = _lazy_view_func("fntnd.views.quizzly_error_notebook_view", "render_error_notebook_view")
+        if fn:
+            fn(client_id=client_id, quiz_id=quiz_id)
+        else:
+            st.error("Could not load the Error Notebook view.")
+            if verr:
+                st.caption(verr)
         return
 
     # --- Usage / cost analytics (all visitors, Supabase) ---
     if view == "analytics":
-        render_data_analysis_view()
+        fn, verr = _lazy_view_func("fntnd.views.quizzly_data_analysis_view", "render_data_analysis_view")
+        if fn:
+            fn()
+        else:
+            st.error("Could not load the Data Analysis view.")
+            if verr:
+                st.caption(verr)
         return
 
     # --- Main Area: Processing & Display ---
@@ -1182,22 +1211,28 @@ def main():
                 correct, total = score
                 st.write(f"{correct}/{total}")
 
-        render_current_quiz_mistakes(
-            client_id=client_id,
-            quiz_id=(qp.get("quiz") or "").strip(),
-            persist_cb=lambda **kwargs: persist_quiz_state(
-                client_id=kwargs["client_id"],
-                quiz_id=kwargs["quiz_id"],
-                quiz_data=st.session_state.get("quiz_data"),
-                verification_report=st.session_state.get("verification_report"),
-                error_notebook=kwargs["error_notebook_current"],
-                answers=kwargs["answers"],
-                quiz_submitted=st.session_state.get("_quiz_submitted"),
-                current_quiz_score=st.session_state.get("_current_quiz_score"),
-                workflow_status_label=st.session_state.get("workflow_status_label"),
-                workflow_status_lines=st.session_state.get("workflow_status_lines") or [],
-            ),
-        )
+        fn, verr = _lazy_view_func("fntnd.views.quizzly_current_quiz_mistakes", "render_current_quiz_mistakes")
+        if fn:
+            fn(
+                client_id=client_id,
+                quiz_id=(qp.get("quiz") or "").strip(),
+                persist_cb=lambda **kwargs: persist_quiz_state(
+                    client_id=kwargs["client_id"],
+                    quiz_id=kwargs["quiz_id"],
+                    quiz_data=st.session_state.get("quiz_data"),
+                    verification_report=st.session_state.get("verification_report"),
+                    error_notebook=kwargs["error_notebook_current"],
+                    answers=kwargs["answers"],
+                    quiz_submitted=st.session_state.get("_quiz_submitted"),
+                    current_quiz_score=st.session_state.get("_current_quiz_score"),
+                    workflow_status_label=st.session_state.get("workflow_status_label"),
+                    workflow_status_lines=st.session_state.get("workflow_status_lines") or [],
+                ),
+            )
+        else:
+            st.warning("Could not load Mistakes Review.")
+            if verr:
+                st.caption(verr)
 
 if __name__ == "__main__":
     main()
