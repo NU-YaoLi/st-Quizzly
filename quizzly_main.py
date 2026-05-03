@@ -36,6 +36,11 @@ def _load_top_level_module(name: str, file_path: Path) -> None:
 def _verify_quizzly_config() -> None:
     mod = sys.modules.get("quizzly_config")
     if mod is None:
+        # Streamlit Cloud + Python 3.14 can occasionally drop sys.modules entries mid-reload.
+        # Reload from disk once rather than crashing.
+        _load_top_level_module("quizzly_config", _root / "quizzly_config.py")
+        mod = sys.modules.get("quizzly_config")
+    if mod is None:
         raise ImportError("quizzly_config was not registered in sys.modules.")
     required = (
         "MIN_QUESTIONS",
@@ -58,16 +63,20 @@ def _load_package(name: str, init_path: Path) -> None:
     if not init_path.is_file():
         raise ImportError(f"Required package init missing: {init_path}")
     pkg_dir = str(init_path.parent)
+    # Use SourceFileLoader for package init too (more stable than spec_from_file_location on 3.14 Cloud).
+    path_str = str(init_path.resolve())
+    loader = SourceFileLoader(name, path_str)
     spec = importlib.util.spec_from_file_location(
         name,
-        init_path,
+        path_str,
+        loader=loader,
         submodule_search_locations=[pkg_dir],
     )
-    if spec is None or spec.loader is None:
+    if spec is None:
         raise ImportError(f"Could not load spec for package {name}")
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
-    spec.loader.exec_module(mod)
+    loader.exec_module(mod)
 
 
 def _load_module(name: str, file_path: Path) -> None:
@@ -92,14 +101,11 @@ import streamlit as st
 
 st.set_page_config(page_title="Quizzly", page_icon="📖", layout="wide")
 
-# Submodules import ``streamlit`` and ``quizzly_config`` — load after those exist.
-for _mod in (
-    "bknd.quizzly_usage_log",
-    "bknd.quizzly_user_ip",
-    "bknd.quizzly_question_upldprcs",
-    "bknd.quizzly_rate_limit",
-):
-    importlib.import_module(_mod)
+# Load backend modules by path (avoid Python 3.14 Cloud dotted-import KeyError).
+_load_module("bknd.quizzly_usage_log", _root / "bknd" / "quizzly_usage_log.py")
+_load_module("bknd.quizzly_user_ip", _root / "bknd" / "quizzly_user_ip.py")
+_load_module("bknd.quizzly_question_upldprcs", _root / "bknd" / "quizzly_question_upldprcs.py")
+_load_module("bknd.quizzly_rate_limit", _root / "bknd" / "quizzly_rate_limit.py")
 
 _load_package("fntnd", _root / "fntnd" / "__init__.py")
 
@@ -124,6 +130,8 @@ _load_module(
 
 # Then load the main frontend module by path.
 _load_module("fntnd.quizzly_ftnd", _root / "fntnd" / "quizzly_ftnd.py")
+if not hasattr(sys.modules.get("fntnd.quizzly_ftnd"), "main"):
+    raise ImportError("Failed to load fntnd.quizzly_ftnd.main (module did not finish initializing).")
 main = sys.modules["fntnd.quizzly_ftnd"].main
 
 

@@ -2,8 +2,6 @@
 Daily generation limits per browser `client` id; Supabase logging uses `user_ip` + `quiz_generation_usage`.
 """
 
-from __future__ import annotations
-
 import ipaddress
 import math
 import os
