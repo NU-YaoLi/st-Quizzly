@@ -92,6 +92,9 @@ class TestDailyGenerationRateLimit(unittest.TestCase):
         with patch("bknd.quizzly_rate_limit.rate_limit_disabled", return_value=False), patch(
             "bknd.quizzly_rate_limit._client",
             return_value=mock_sb,
+        ), patch(
+            "bknd.quizzly_rate_limit.ensure_user_ip_geo_and_read",
+            return_value=(None, None, None),
         ), patch("bknd.quizzly_rate_limit.st") as mock_st:
             mock_st.session_state = {}
             from bknd.quizzly_rate_limit import record_successful_generation
@@ -100,7 +103,13 @@ class TestDailyGenerationRateLimit(unittest.TestCase):
             self.assertIsNone(err)
             mock_sb.table.assert_called_with("quiz_generation_usage")
             mock_sb.table.return_value.insert.assert_called_once_with(
-                {"user_ip_id": "00000000-0000-0000-0000-0000000000ab", "estimated_cost_usd": None}
+                {
+                    "user_ip_id": "00000000-0000-0000-0000-0000000000ab",
+                    "estimated_cost_usd": None,
+                    "country": None,
+                    "region": None,
+                    "city": None,
+                }
             )
 
 

@@ -1,9 +1,10 @@
 """
-Admin-style usage dashboard: generations and estimated spend across all visitors (UTC).
+Admin-style usage dashboard: users, per-quiz detail, and cost (UTC).
 """
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date, datetime, timezone
 
 import pandas as pd
@@ -14,8 +15,9 @@ from plotly.subplots import make_subplots
 from bknd.quizzly_analytics import (
     DailyRow,
     fetch_daily_stats,
-    fetch_usage_detail_rows,
     fetch_raw_events,
+    fetch_usage_detail_rows,
+    fetch_user_ip_rows,
     hour_of_day_counts,
     period_bounds,
 )
@@ -24,7 +26,6 @@ _SESSION_UNLOCK = "quizzly_analytics_unlocked"
 
 
 def _analytics_password() -> str:
-    # Simple, lightweight access gate (non-critical admin page).
     return "1404"
 
 
@@ -49,8 +50,79 @@ def _cached_usage_details(ts_start: float, ts_end: float):
     return fetch_usage_detail_rows(start, end)
 
 
+def _fmt_location(meta: dict | None, snap_c: str | None, snap_r: str | None, snap_ct: str | None) -> str:
+    c = (meta or {}).get("country") or snap_c
+    r = (meta or {}).get("region") or snap_r
+    ct = (meta or {}).get("city") or snap_ct
+    parts = [p for p in (ct, r, c) if p]
+    return ", ".join(parts) if parts else "—"
+
+
+def _latest_snapshot(evs: list[dict], key: str) -> str | None:
+    for e in sorted(evs, key=lambda x: str(x.get("created_at") or ""), reverse=True):
+        v = e.get(key)
+        if v:
+            return str(v)
+    return None
+
+
+def _build_user_summary(detail_rows: list[dict], ip_meta: dict[str, dict]) -> pd.DataFrame:
+    by_uid: dict[str, list[dict]] = defaultdict(list)
+    for r in detail_rows:
+        uid = r.get("user_ip_id")
+        if uid:
+            by_uid[str(uid)].append(r)
+
+    out: list[dict] = []
+    for uid, evs in sorted(by_uid.items(), key=lambda x: (-len(x[1]), x[0])):
+        meta = ip_meta.get(uid) or {}
+        ip_disp = meta.get("ip") or "—"
+        n = len(evs)
+        costs = []
+        for x in evs:
+            v = x.get("estimated_cost_usd")
+            if v is not None:
+                try:
+                    costs.append(float(v))
+                except (TypeError, ValueError):
+                    pass
+        total_c = sum(costs)
+        avg_c = total_c / n if n else 0.0
+        sc = _latest_snapshot(evs, "country")
+        sr = _latest_snapshot(evs, "region")
+        sct = _latest_snapshot(evs, "city")
+        out.append(
+            {
+                "IP": ip_disp,
+                "Location": _fmt_location(meta, sc, sr, sct),
+                "Country": meta.get("country") or sc or "—",
+                "Region": meta.get("region") or sr or "—",
+                "City": meta.get("city") or sct or "—",
+                "Generations": n,
+                "Total est. spend (USD)": round(total_c, 4),
+                "Avg spend / gen (USD)": round(avg_c, 4),
+            }
+        )
+    return pd.DataFrame(out)
+
+
+def _token_sum_row(r: dict, pref: str) -> float:
+    a = r.get(f"{pref}_input_tokens")
+    b = r.get(f"{pref}_cached_input_tokens")
+    c = r.get(f"{pref}_output_tokens")
+    s = 0.0
+    for v in (a, b, c):
+        if v is None:
+            continue
+        try:
+            s += float(v)
+        except (TypeError, ValueError):
+            pass
+    return s
+
+
 def render_data_analysis_view() -> None:
-    st.title("Usage & cost analytics")
+    st.title("Quizzly Data Analysis")
 
     if not st.session_state.get(_SESSION_UNLOCK):
         st.caption("Admin only — enter password to view aggregate usage and estimated spend.")
@@ -66,8 +138,8 @@ def render_data_analysis_view() -> None:
         return
 
     st.caption(
-        "Estimated OpenAI spend (from in-app model pricing) and quiz-generation counts, "
-        "aggregated across **all** visitors. Times are **UTC**."
+        "Estimated OpenAI spend (from in-app model pricing) and activity across **all** visitors. "
+        "Times are **UTC**. Geo uses ip-api.com and ipwho.is (HTTPS fallback)."
     )
     c_lock, _ = st.columns([1, 3])
     with c_lock:
@@ -98,27 +170,16 @@ def render_data_analysis_view() -> None:
     ts1 = end_ex.timestamp()
 
     rows, err = _cached_daily_stats(ts0, ts1)
-    detail_rows = []
-    detail_err = None
+    detail_rows, detail_err = _cached_usage_details(ts0, ts1)
 
     if err:
         st.error(err)
         return
 
-    if not rows:
-        st.info(
-            "No quiz generations in this window yet — run **Generate & Verify Quiz** after deploying "
-            "tracking, or widen the time range."
-        )
-        st.divider()
-        st.markdown(
-            "**Tip:** migrate `quizzly_sql.txt` in Supabase and generate at least once so daily and "
-            "detail analytics populate."
-        )
-        return
-
+    df_daily: pd.DataFrame | None = None
+    has_agg = bool(rows)
     if rows:
-        df = pd.DataFrame(
+        df_daily = pd.DataFrame(
             [
                 {
                     "Day (UTC)": r.day.isoformat(),
@@ -129,82 +190,263 @@ def render_data_analysis_view() -> None:
                 for r in rows
             ]
         )
-        df["Day (UTC)"] = pd.to_datetime(df["Day (UTC)"])
+        df_daily["Day (UTC)"] = pd.to_datetime(df_daily["Day (UTC)"])
 
-        total_g = int(df["Generations"].sum())
-        total_usd = float(df["Est. spend (USD)"].sum())
-        days_n = len(df)
-        avg_g = total_g / days_n if days_n else 0.0
-        avg_usd = total_usd / days_n if days_n else 0.0
-        imax = int(df["Generations"].to_numpy().argmax()) if days_n else 0
-        peak_day = str(df.iloc[imax]["Day (UTC)"].date()) if days_n else "—"
-        peak_n = int(df["Generations"].iloc[imax]) if days_n else 0
+    tab_user, tab_quiz, tab_cost = st.tabs(["User", "Quiz", "Cost"])
 
-        m1, m2, m3, m4, m5 = st.columns(5)
-        m1.metric("Total generations", f"{total_g:,}")
-        m2.metric("Total est. spend", f"${total_usd:,.2f}")
-        m3.metric("Avg generations / day", f"{avg_g:,.1f}")
-        m4.metric("Avg spend / day", f"${avg_usd:,.2f}")
-        m5.metric("Busiest day (UTC)", f"{peak_n} on {peak_day}")
-
-        st.divider()
-
-        fig = make_subplots(
-            rows=2,
-            cols=1,
-            shared_xaxes=True,
-            vertical_spacing=0.08,
-            subplot_titles=("Quiz generations per day", "Estimated spend per day (USD)"),
-            row_heights=[0.55, 0.45],
-        )
-        fig.add_trace(
-            go.Bar(
-                x=df["Day (UTC)"],
-                y=df["Generations"],
-                name="Generations",
-                marker_color="#636efa",
-            ),
-            row=1,
-            col=1,
-        )
-        fig.add_trace(
-            go.Bar(
-                x=df["Day (UTC)"],
-                y=df["Est. spend (USD)"],
-                name="Est. spend",
-                marker_color="#00cc96",
-            ),
-            row=2,
-            col=1,
-        )
-        fig.update_layout(height=640, showlegend=False, margin=dict(l=10, r=10, t=40, b=10))
-        fig.update_yaxes(title_text="Count", row=1, col=1)
-        fig.update_yaxes(title_text="USD", row=2, col=1)
-        st.plotly_chart(fig, use_container_width=True)
-
-        df["Cumulative spend (USD)"] = df["Est. spend (USD)"].cumsum()
-        fig_c = go.Figure()
-        fig_c.add_trace(
-            go.Scatter(
-                x=df["Day (UTC)"],
-                y=df["Cumulative spend (USD)"],
-                fill="tozeroy",
-                mode="lines",
-                line=dict(color="#ab63fa", width=2),
-                fillcolor="rgba(171, 99, 250, 0.25)",
-                name="Cumulative spend",
+    with tab_user:
+        st.markdown("**Visitors** — IP, coarse location, generation counts, and estimated spend.")
+        if detail_err:
+            st.warning(f"Could not load usage detail: {detail_err}")
+        elif not detail_rows:
+            st.info(
+                "No quiz generations in this window yet — widen the range or run **Generate & Verify Quiz**."
             )
-        )
-        fig_c.update_layout(
-            title="Cumulative estimated spend (USD)",
-            height=360,
-            margin=dict(l=10, r=10, t=40, b=10),
-            yaxis_title="USD",
-            xaxis_title="Day (UTC)",
-        )
-        st.plotly_chart(fig_c, use_container_width=True)
+        else:
+            uids = [str(r.get("user_ip_id")) for r in detail_rows if r.get("user_ip_id")]
+            ip_meta, ip_err = fetch_user_ip_rows(uids)
+            if ip_err:
+                st.warning(ip_err)
+            udf = _build_user_summary(detail_rows, ip_meta)
+            tgen = int(udf["Generations"].sum())
+            tspend = float(udf["Total est. spend (USD)"].sum())
+            nu = len(udf)
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Distinct visitors (with usage)", f"{nu:,}")
+            m2.metric("Total generations", f"{tgen:,}")
+            m3.metric("Total est. spend", f"${tspend:,.2f}")
+            m4.metric("Avg spend / generation", f"${(tspend / tgen if tgen else 0):,.4f}")
 
-        with st.expander("Hourly distribution", expanded=False):
+            if "Country" in udf.columns:
+                top_c = (
+                    udf[udf["Country"] != "—"]["Country"].value_counts().head(12)
+                    if len(udf)
+                    else pd.Series(dtype=int)
+                )
+                if len(top_c):
+                    fig_cy = go.Figure(
+                        data=[go.Bar(x=top_c.index.tolist(), y=top_c.values.tolist(), marker_color="#636efa")]
+                    )
+                    fig_cy.update_layout(
+                        title="Visitors by country (from user_ip / snapshots)",
+                        height=380,
+                        xaxis_tickangle=-28,
+                        yaxis_title="Visitors",
+                        margin=dict(l=10, r=10, t=48, b=10),
+                    )
+                    st.plotly_chart(fig_cy, use_container_width=True)
+
+            st.subheader("Visitor table")
+            st.dataframe(udf, use_container_width=True, hide_index=True)
+
+    with tab_quiz:
+        st.markdown(
+            "**Each generation** — mode, materials, duration, token buckets, cost, and geo snapshot."
+        )
+        if detail_err:
+            st.warning(f"Could not load usage detail: {detail_err}")
+        elif not detail_rows:
+            st.info("No generations in this window.")
+        else:
+            ddf = pd.DataFrame(detail_rows)
+            ddf["generation_mode"] = ddf["generation_mode"].fillna("unknown").replace("", "unknown")
+            ddf["material_source"] = ddf["material_source"].fillna("unknown").replace("", "unknown")
+            fm1, fm2 = st.columns(2)
+            with fm1:
+                mode_pick = st.multiselect(
+                    "Generation modes",
+                    options=sorted(ddf["generation_mode"].unique().tolist()),
+                    default=sorted(ddf["generation_mode"].unique().tolist()),
+                )
+            with fm2:
+                src_pick = st.multiselect(
+                    "Material sources",
+                    options=sorted(ddf["material_source"].unique().tolist()),
+                    default=sorted(ddf["material_source"].unique().tolist()),
+                )
+            ddf_f = ddf[ddf["generation_mode"].isin(mode_pick) & ddf["material_source"].isin(src_pick)].copy()
+            n_sel = len(ddf_f)
+            n_all = len(ddf)
+            st.caption(f"**{n_sel:,}** of **{n_all:,}** generations match filters.")
+
+            for pref in ("ext", "gen", "vrf"):
+                in_col = f"{pref}_input_tokens"
+                if in_col not in ddf_f.columns:
+                    ddf_f[f"{pref}_tokens_total"] = 0.0
+                    continue
+                ddf_f[f"{pref}_tokens_total"] = ddf_f.apply(lambda r: _token_sum_row(r.to_dict(), pref), axis=1)
+
+            for tn in ("ext_tokens_total", "gen_tokens_total", "vrf_tokens_total"):
+                if tn not in ddf_f.columns:
+                    ddf_f[tn] = 0.0
+            ddf_f["tokens_total"] = ddf_f["ext_tokens_total"] + ddf_f["gen_tokens_total"] + ddf_f["vrf_tokens_total"]
+
+            show_cols = [
+                "created_at",
+                "country",
+                "region",
+                "city",
+                "generation_mode",
+                "material_source",
+                "material_quantity",
+                "num_questions",
+                "upload_total_bytes",
+                "web_text_chars",
+                "generation_duration_sec",
+                "estimated_cost_usd",
+                "ext_tokens_total",
+                "gen_tokens_total",
+                "vrf_tokens_total",
+                "tokens_total",
+                "user_ip_id",
+            ]
+            present = [c for c in show_cols if c in ddf_f.columns]
+            quiz_show = ddf_f[present].copy()
+            quiz_show = quiz_show.rename(
+                columns={
+                    "created_at": "Created (UTC)",
+                    "generation_mode": "Mode",
+                    "material_source": "Material",
+                    "material_quantity": "Materials #",
+                    "num_questions": "Questions",
+                    "upload_total_bytes": "Upload bytes",
+                    "web_text_chars": "Web chars",
+                    "generation_duration_sec": "Duration (s)",
+                    "estimated_cost_usd": "Est. cost (USD)",
+                    "user_ip_id": "user_ip id",
+                }
+            )
+            st.subheader("All generations (filtered)")
+            st.dataframe(quiz_show.sort_values("Created (UTC)", ascending=False), use_container_width=True, hide_index=True)
+
+            if n_sel > 0:
+                st.subheader("Mode × material mix")
+                grp = (
+                    ddf_f.groupby(["generation_mode", "material_source"], dropna=False)
+                    .agg(generations=("created_at", "count"), avg_cost=("estimated_cost_usd", "mean"))
+                    .reset_index()
+                )
+                grp["avg_cost"] = grp["avg_cost"].apply(lambda x: round(float(x), 4) if pd.notna(x) else None)
+                grp["share %"] = (100.0 * grp["generations"] / float(n_sel)).round(1)
+                st.dataframe(
+                    grp.rename(
+                        columns={"generation_mode": "Mode", "material_source": "Material", "avg_cost": "Avg cost"}
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+                labels = grp["generation_mode"].astype(str) + " · " + grp["material_source"].astype(str)
+                fig_ms = go.Figure(data=[go.Bar(x=labels, y=grp["generations"], marker_color="#00cc96")])
+                fig_ms.update_layout(
+                    title="Generations by mode × material",
+                    height=420,
+                    showlegend=False,
+                    yaxis_title="Count",
+                    xaxis_tickangle=-25,
+                )
+                st.plotly_chart(fig_ms, use_container_width=True)
+
+                lat = pd.to_numeric(ddf_f["generation_duration_sec"], errors="coerce").dropna()
+                if len(lat):
+                    st.subheader("Workflow duration")
+                    p50 = float(lat.quantile(0.5))
+                    p90 = float(lat.quantile(0.9))
+                    lp1, lp2, lp3 = st.columns(3)
+                    lp1.metric("Runs (filtered)", f"{len(lat):,}")
+                    lp2.metric("P50 duration (s)", f"{p50:.1f}")
+                    lp3.metric("P90 duration (s)", f"{p90:.1f}")
+                    fig_l = go.Figure()
+                    fig_l.add_trace(go.Histogram(x=lat, nbinsx=min(40, max(10, int(len(lat) ** 0.5) * 3))))
+                    fig_l.add_vline(x=p50, line_dash="dash", line_color="#636efa", annotation_text="P50")
+                    fig_l.add_vline(x=p90, line_dash="dot", line_color="#ef553b", annotation_text="P90")
+                    fig_l.update_layout(
+                        title="generation_duration_sec distribution",
+                        xaxis_title="Seconds",
+                        yaxis_title="Count",
+                        height=380,
+                    )
+                    st.plotly_chart(fig_l, use_container_width=True)
+
+    with tab_cost:
+        st.markdown("**Cost & volume** — daily spend, cumulative trend, and hourly activity.")
+        if not has_agg or df_daily is None:
+            st.info(
+                "No quiz generations in this window yet — run **Generate & Verify Quiz** after deploying "
+                "tracking, or widen the time range."
+            )
+        else:
+            total_g = int(df_daily["Generations"].sum())
+            total_usd = float(df_daily["Est. spend (USD)"].sum())
+            days_n = len(df_daily)
+            avg_g = total_g / days_n if days_n else 0.0
+            avg_usd = total_usd / days_n if days_n else 0.0
+            imax = int(df_daily["Generations"].to_numpy().argmax()) if days_n else 0
+            peak_day = str(df_daily.iloc[imax]["Day (UTC)"].date()) if days_n else "—"
+            peak_n = int(df_daily["Generations"].iloc[imax]) if days_n else 0
+
+            m1, m2, m3, m4, m5 = st.columns(5)
+            m1.metric("Total generations", f"{total_g:,}")
+            m2.metric("Total est. spend", f"${total_usd:,.2f}")
+            m3.metric("Avg generations / day", f"{avg_g:,.1f}")
+            m4.metric("Avg spend / day", f"${avg_usd:,.2f}")
+            m5.metric("Busiest day (UTC)", f"{peak_n} on {peak_day}")
+
+            fig = make_subplots(
+                rows=2,
+                cols=1,
+                shared_xaxes=True,
+                vertical_spacing=0.08,
+                subplot_titles=("Quiz generations per day", "Estimated spend per day (USD)"),
+                row_heights=[0.55, 0.45],
+            )
+            fig.add_trace(
+                go.Bar(
+                    x=df_daily["Day (UTC)"],
+                    y=df_daily["Generations"],
+                    name="Generations",
+                    marker_color="#636efa",
+                ),
+                row=1,
+                col=1,
+            )
+            fig.add_trace(
+                go.Bar(
+                    x=df_daily["Day (UTC)"],
+                    y=df_daily["Est. spend (USD)"],
+                    name="Est. spend",
+                    marker_color="#00cc96",
+                ),
+                row=2,
+                col=1,
+            )
+            fig.update_layout(height=640, showlegend=False, margin=dict(l=10, r=10, t=40, b=10))
+            fig.update_yaxes(title_text="Count", row=1, col=1)
+            fig.update_yaxes(title_text="USD", row=2, col=1)
+            st.plotly_chart(fig, use_container_width=True)
+
+            df_c = df_daily.copy()
+            df_c["Cumulative spend (USD)"] = df_c["Est. spend (USD)"].cumsum()
+            fig_c = go.Figure()
+            fig_c.add_trace(
+                go.Scatter(
+                    x=df_c["Day (UTC)"],
+                    y=df_c["Cumulative spend (USD)"],
+                    fill="tozeroy",
+                    mode="lines",
+                    line=dict(color="#ab63fa", width=2),
+                    fillcolor="rgba(171, 99, 250, 0.25)",
+                    name="Cumulative spend",
+                )
+            )
+            fig_c.update_layout(
+                title="Cumulative estimated spend (USD)",
+                height=360,
+                margin=dict(l=10, r=10, t=40, b=10),
+                yaxis_title="USD",
+                xaxis_title="Day (UTC)",
+            )
+            st.plotly_chart(fig_c, use_container_width=True)
+
             raw_ev, herr = _cached_raw_events(ts0, ts1)
             if herr:
                 st.warning(herr)
@@ -224,165 +466,28 @@ def render_data_analysis_view() -> None:
                         ]
                     )
                     fig_h.update_layout(
-                        title="Generations by hour of day (UTC, whole period)",
+                        title="Generations by hour of day (UTC)",
                         height=380,
                         xaxis_title="Hour (UTC)",
                         yaxis_title="Generations",
                         margin=dict(l=10, r=10, t=40, b=10),
                     )
                     st.plotly_chart(fig_h, use_container_width=True)
-                else:
-                    st.info("No hourly data in this window.")
-            else:
-                st.info("No hourly data in this window.")
 
-    with st.expander("Mode/source + tokens + latency (detailed)", expanded=False):
-        detail_rows, detail_err = _cached_usage_details(ts0, ts1)
-        if detail_err:
-            st.warning(f"Detailed usage breakdown unavailable: {detail_err}")
-        elif not detail_rows:
-            st.info("No detailed usage rows in this window yet.")
-        else:
-            st.subheader("Mode & material source")
-            ddf = pd.DataFrame(detail_rows)
-            ddf["generation_mode"] = ddf["generation_mode"].fillna("unknown").replace("", "unknown")
-            ddf["material_source"] = ddf["material_source"].fillna("unknown").replace("", "unknown")
-            fm1, fm2 = st.columns(2)
-            with fm1:
-                mode_pick = st.multiselect(
-                    "Generation modes",
-                    options=sorted(ddf["generation_mode"].unique().tolist()),
-                    default=sorted(ddf["generation_mode"].unique().tolist()),
-                )
-            with fm2:
-                src_pick = st.multiselect(
-                    "Material sources",
-                    options=sorted(ddf["material_source"].unique().tolist()),
-                    default=sorted(ddf["material_source"].unique().tolist()),
-                )
-            ddf_f = ddf[
-                ddf["generation_mode"].isin(mode_pick) & ddf["material_source"].isin(src_pick)
-            ].copy()
-            n_sel = len(ddf_f)
-            n_all = len(ddf)
-            if n_sel == 0:
-                st.info("No rows match the selected filters.")
-            else:
-                st.caption(
-                    f"Showing **{n_sel:,}** of **{n_all:,}** generations in range after filters "
-                    "(Share % is within the filtered set)."
-                )
-                for pref in ("ext", "gen", "vrf"):
-                    in_col = f"{pref}_input_tokens"
-                    ca_col = f"{pref}_cached_input_tokens"
-                    ou_col = f"{pref}_output_tokens"
-                    if in_col not in ddf_f.columns:
-                        ddf_f[f"{pref}_tokens_sum"] = 0.0
-                        continue
-                    ddf_f[f"{pref}_tokens_sum"] = (
-                        pd.to_numeric(ddf_f[in_col], errors="coerce").fillna(0)
-                        + pd.to_numeric(ddf_f[ca_col], errors="coerce").fillna(0)
-                        + pd.to_numeric(ddf_f[ou_col], errors="coerce").fillna(0)
-                    )
-
-                grp = (
-                    ddf_f.groupby(["generation_mode", "material_source"], dropna=False)
-                    .agg(
-                        generations=("created_at", "count"),
-                        avg_est_cost_usd=("estimated_cost_usd", "mean"),
-                        avg_ext_tokens=("ext_tokens_sum", "mean"),
-                        avg_gen_tokens=("gen_tokens_sum", "mean"),
-                        avg_vrf_tokens=("vrf_tokens_sum", "mean"),
-                    )
-                    .reset_index()
-                )
-                grp["share_pct"] = 100.0 * grp["generations"] / float(n_sel)
-                for col in (
-                    "avg_est_cost_usd",
-                    "avg_ext_tokens",
-                    "avg_gen_tokens",
-                    "avg_vrf_tokens",
-                    "share_pct",
-                ):
-                    if col in grp.columns:
-                        grp[col] = grp[col].apply(
-                            lambda x: round(float(x), 2) if pd.notna(x) else None
-                        )
-
-                show_grp = grp.rename(
-                    columns={
-                        "generation_mode": "Mode",
-                        "material_source": "Material",
-                        "generations": "Generations",
-                        "share_pct": "Share %",
-                        "avg_est_cost_usd": "Avg est. cost (USD)",
-                        "avg_ext_tokens": "Avg ext tokens / run",
-                        "avg_gen_tokens": "Avg gen tokens / run",
-                        "avg_vrf_tokens": "Avg vrf tokens / run",
-                    }
-                )
-                st.dataframe(show_grp, use_container_width=True, hide_index=True)
-
-                labels = grp["generation_mode"].astype(str) + " · " + grp["material_source"].astype(
-                    str
-                )
-                fig_ms = go.Figure(data=[go.Bar(x=labels, y=grp["generations"])])
-                fig_ms.update_layout(
-                    title="Generations by mode × material (filtered)",
-                    height=420,
-                    showlegend=False,
-                    yaxis_title="Count",
-                    xaxis_tickangle=-25,
-                )
-                st.plotly_chart(fig_ms, use_container_width=True)
-
-            lat_basis = ddf_f if n_sel > 0 else ddf
-            st.subheader("Workflow duration (generate → verify complete)")
-            if n_sel > 0:
-                st.caption("Based on rows matching the mode/source filters above.")
-            else:
-                st.caption(
-                    "Filters excluded all rows — duration uses **all** generations in this window."
-                )
-
-            lat = pd.to_numeric(lat_basis["generation_duration_sec"], errors="coerce").dropna()
-            if len(lat) == 0:
-                st.info("No `generation_duration_sec` in range (run DB migration and new generations).")
-            else:
-                p50 = float(lat.quantile(0.5))
-                p90 = float(lat.quantile(0.9))
-                lp1, lp2, lp3 = st.columns(3)
-                lp1.metric("Runs (filtered)", f"{len(lat):,}")
-                lp2.metric("P50 duration (s)", f"{p50:.1f}")
-                lp3.metric("P90 duration (s)", f"{p90:.1f}")
-                fig_l = go.Figure()
-                fig_l.add_trace(
-                    go.Histogram(x=lat, nbinsx=min(40, max(10, int(len(lat) ** 0.5) * 3)))
-                )
-                fig_l.add_vline(x=p50, line_dash="dash", line_color="#636efa", annotation_text="P50")
-                fig_l.add_vline(x=p90, line_dash="dot", line_color="#ef553b", annotation_text="P90")
-                fig_l.update_layout(
-                    title="Distribution of generation_duration_sec (seconds)",
-                    xaxis_title="Seconds",
-                    yaxis_title="Count",
-                    height=380,
-                )
-                st.plotly_chart(fig_l, use_container_width=True)
-
-    if rows:
-        st.subheader("Daily breakdown")
-        show_df = df.drop(columns=["Cumulative spend (USD)"], errors="ignore").sort_values(
-            "Day (UTC)", ascending=False
-        )
-        st.dataframe(show_df, use_container_width=True, hide_index=True)
+            st.subheader("Daily breakdown")
+            show_df = df_daily.drop(columns=["Cumulative spend (USD)"], errors="ignore").sort_values(
+                "Day (UTC)", ascending=False
+            )
+            st.dataframe(show_df, use_container_width=True, hide_index=True)
 
     st.divider()
     st.markdown(
         """
 **How this works**
 
-- Each successful **Generate & Verify Quiz** inserts one row linked to **`user_ip`** (client IP + best-effort city/region/country via ip-api.com).
-- **Personal data:** you are storing real IPs and coarse location for operations — protect Supabase and this dashboard (password + strong `ANALYTICS_PASSWORD` in secrets).
+- Each successful **Generate & Verify Quiz** inserts one row into **`quiz_generation_usage`**, linked to **`user_ip`**, with a **geo snapshot** (`country`, `region`, `city`) when available.
+- **`user_ip`** is refreshed when geo was missing (HTTPS fallback helps when HTTP lookups are blocked).
 - Spend is **estimated** from `MODEL_PRICING_USD_PER_1K` in `quizzly_config.py`, not your OpenAI invoice.
+- Protect Supabase and this page (password + strong deployment secrets).
         """
     )

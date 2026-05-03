@@ -15,13 +15,25 @@ from bknd.quizzly_rate_limit import TABLE_NAME, supabase_admin_client
 
 USAGE_DETAIL_COLUMNS = (
     "created_at,estimated_cost_usd,user_ip_id,generation_mode,material_source,"
-    "generation_duration_sec,"
+    "material_quantity,num_questions,upload_total_bytes,web_text_chars,"
+    "generation_duration_sec,country,region,city,"
     "ext_input_tokens,ext_cached_input_tokens,ext_output_tokens,"
     "gen_input_tokens,gen_cached_input_tokens,gen_output_tokens,"
     "vrf_input_tokens,vrf_cached_input_tokens,vrf_output_tokens"
 )
 
-USAGE_DETAIL_COLUMNS_MIN = "created_at,estimated_cost_usd,user_ip_id"
+USAGE_DETAIL_COLUMNS_MIN = (
+    "created_at,estimated_cost_usd,user_ip_id,generation_mode,material_source,"
+    "generation_duration_sec"
+)
+
+USAGE_DETAIL_COLUMNS_LEGACY = (
+    "created_at,estimated_cost_usd,user_ip_id,generation_mode,material_source,"
+    "generation_duration_sec,"
+    "ext_input_tokens,ext_cached_input_tokens,ext_output_tokens,"
+    "gen_input_tokens,gen_cached_input_tokens,gen_output_tokens,"
+    "vrf_input_tokens,vrf_cached_input_tokens,vrf_output_tokens"
+)
 
 
 @dataclass(frozen=True)
@@ -260,11 +272,45 @@ def fetch_usage_detail_rows(
 
     all_rows, err = _pull(USAGE_DETAIL_COLUMNS)
     err_l = (err or "").lower()
-    if err and ("42703" in err or "does not exist" in err_l or "user_ip_id" in err):
+    if err and ("42703" in err or "does not exist" in err_l):
+        all_rows, err = _pull(USAGE_DETAIL_COLUMNS_LEGACY)
+        err_l = ((err or "").lower() if err else "")
+    if err and ("42703" in err or "does not exist" in err_l):
         all_rows, err = _pull(USAGE_DETAIL_COLUMNS_MIN)
     if err:
         return [], err
     return all_rows, None
+
+
+def fetch_user_ip_rows(
+    user_ip_ids: list[str],
+) -> tuple[dict[str, dict[str, Any]], str | None]:
+    """Map user_ip id -> {ip, country, region, city}."""
+    ids = list(dict.fromkeys(str(i).strip() for i in user_ip_ids if i))
+    if not ids:
+        return {}, None
+    supabase = supabase_admin_client()
+    if supabase is None:
+        return {}, "Supabase is not configured."
+
+    out: dict[str, dict[str, Any]] = {}
+    chunk = 80
+    try:
+        for i in range(0, len(ids), chunk):
+            part = ids[i : i + chunk]
+            res = (
+                supabase.table("user_ip")
+                .select("id,ip,country,region,city")
+                .in_("id", part)
+                .execute()
+            )
+            for row in res.data or []:
+                uid = str(row.get("id") or "")
+                if uid:
+                    out[uid] = row
+        return out, None
+    except Exception as e:
+        return {}, str(e)
 
 
 def period_bounds(

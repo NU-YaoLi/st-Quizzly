@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 import streamlit as st
 
 from bknd.quizzly_usage_log import QuizGenerationUsageFields
-from bknd.quizzly_user_ip import get_or_create_user_ip_id
+from bknd.quizzly_user_ip import ensure_user_ip_geo_and_read, get_or_create_user_ip_id
 from quizzly_config import DAILY_GENERATION_LIMIT, SUPABASE_URL
 
 TABLE_NAME = "quiz_generation_usage"
@@ -211,6 +211,11 @@ def record_successful_generation(
     row_full: dict = (
         usage.as_insert_dict(uid) if usage is not None else {"user_ip_id": uid, "estimated_cost_usd": None}
     )
+    gc, gr, gct = ensure_user_ip_geo_and_read(supabase, uid)
+    row_full["country"] = gc
+    row_full["region"] = gr
+    row_full["city"] = gct
+
     row_min: dict = {"user_ip_id": uid}
     try:
         supabase.table(TABLE_NAME).insert(row_full).execute()
@@ -219,8 +224,16 @@ def record_successful_generation(
         msg = f"{type(e).__name__}: {e!s}"
         if "42703" in msg or ("does not exist" in msg.lower() and "column" in msg.lower()):
             try:
-                supabase.table(TABLE_NAME).insert(row_min).execute()
+                slim = {k: v for k, v in row_full.items() if k not in ("country", "region", "city")}
+                supabase.table(TABLE_NAME).insert(slim).execute()
                 return None
             except Exception as e2:
+                msg2 = f"{type(e2).__name__}: {e2!s}"
+                if "42703" in msg2 or ("does not exist" in msg2.lower() and "column" in msg2.lower()):
+                    try:
+                        supabase.table(TABLE_NAME).insert(row_min).execute()
+                        return None
+                    except Exception as e3:
+                        return str(e3)
                 return str(e2)
         return str(e)
