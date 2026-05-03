@@ -139,12 +139,22 @@ def render_data_analysis_view() -> None:
 
     st.caption(
         "Estimated OpenAI spend (from in-app model pricing) and activity across **all** visitors. "
-        "Times are **UTC**. Geo uses ip-api.com and ipwho.is (HTTPS fallback)."
+        "Times are **UTC**. Geo uses ip-api.com and ipwho.is (HTTPS fallback). "
+        "Numbers are cached briefly — use **Refresh data** after new generations or DB changes."
     )
-    c_lock, _ = st.columns([1, 3])
+    c_lock, c_refresh, _ = st.columns([1, 1, 2])
     with c_lock:
         if st.button("Lock", help="Clear analytics access for this browser session"):
             st.session_state.pop(_SESSION_UNLOCK, None)
+            st.rerun()
+    with c_refresh:
+        if st.button(
+            "Refresh data",
+            help="Clear cached Supabase queries and reload (use after new rows in the database).",
+        ):
+            _cached_daily_stats.clear()
+            _cached_raw_events.clear()
+            _cached_usage_details.clear()
             st.rerun()
 
     period = st.selectbox(

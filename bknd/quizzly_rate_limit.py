@@ -1,5 +1,5 @@
 """
-Daily per-client-IP quiz generation limits backed by Supabase (`user_ip` + `quiz_generation_usage`).
+Daily generation limits per browser `client` id; Supabase logging uses `user_ip` + `quiz_generation_usage`.
 """
 
 from __future__ import annotations
@@ -44,13 +44,25 @@ def rate_limit_disabled() -> bool:
 
 def get_client_ip() -> str:
     """
-    Best-effort client IP from Streamlit request headers (works on Streamlit Cloud
-    via X-Forwarded-For). Local `streamlit run` often yields 'unknown'.
+    Best-effort client IP for analytics / geo.
+
+    Order:
+    1. ``st.context.ip_address`` (Streamlit ≥1.45; resolves proxy chains on Cloud).
+    2. ``X-Forwarded-For`` / ``X-Real-IP`` headers (first hop).
+
+    Local ``streamlit run`` often yields a LAN address or ``unknown``.
     """
     try:
         ctx = getattr(st, "context", None)
         if ctx is None:
             return "unknown"
+
+        ip_direct = getattr(ctx, "ip_address", None)
+        if ip_direct is not None:
+            ip = str(ip_direct).strip()
+            if ip and ip.lower() != "none":
+                return ip
+
         headers = getattr(ctx, "headers", None)
         if not headers:
             return "unknown"
