@@ -199,6 +199,7 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
      2) Then 1 sentence per wrong option: why it is wrong (each for a different reason).
    - Use double newlines (\\n\\n) between sections for readability.
    - Explanations must be self-contained (no "the document says" phrasing) and must not use source-container wording.
+   - When the source is a website, be concrete: include at least one specific term/name/number from the web content in the first section (B1 English).
 
 ### STRICT CONSTRAINTS
 1. **Source Truth:** The logic to answer the question MUST come strictly from the provided document. You are encouraged to invent fictional characters or hypothetical scenarios for the questions, but the core academic concepts and correct answers must be 100% grounded in the text.

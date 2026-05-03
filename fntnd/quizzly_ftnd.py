@@ -36,6 +36,7 @@ try:
     from bknd.quizzly_question_vrf import (
         run_quiz_output_guard,
         validate_quiz_shape,
+        rebalance_correct_options_evenly,
         verify_quiz,
     )
 except Exception as _e:  # pragma: no cover
@@ -52,6 +53,9 @@ except Exception as _e:  # pragma: no cover
         return quiz
 
     def run_quiz_output_guard(quiz_data: dict) -> dict:  # type: ignore[no-redef]
+        return quiz_data
+
+    def rebalance_correct_options_evenly(quiz_data: dict) -> dict:  # type: ignore[no-redef]
         return quiz_data
 
 from quizzly_config import (
@@ -675,6 +679,7 @@ def main():
                 log_line("Running output safety guard...")
                 quiz_data = run_quiz_output_guard(quiz_data)
                 quiz_data = validate_quiz_shape(quiz_data, num_questions)
+                quiz_data = rebalance_correct_options_evenly(quiz_data)
 
                 report: dict | None = None
                 vrf_usage: dict = {}

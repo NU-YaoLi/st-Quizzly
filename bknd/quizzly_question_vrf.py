@@ -7,6 +7,83 @@ from langchain_openai import ChatOpenAI
 from quizzly_config import ANSWER_LETTERS, QUIZZLY_MODEL
 
 
+def _strip_option_prefix(opt: str) -> str:
+    s = str(opt or "").strip()
+    # Model sometimes returns "A) ..." even though UI labels options; strip it.
+    if len(s) >= 3 and s[0] in {"A", "B", "C", "D"} and s[1] in {")", ".", ":"}:
+        return s[2:].lstrip()
+    if len(s) >= 4 and s[0] in {"A", "B", "C", "D"} and s[1] == " " and s[2] in {")", ".", ":"}:
+        return s[3:].lstrip()
+    return s
+
+
+def _remap_explanation_letters(expl: str, mapping: dict[str, str]) -> str:
+    """
+    Remap "Option A/B/C/D" references in explanation text to new letters.
+    Uses placeholders to avoid A->B then B->C cascading issues.
+    """
+    if not expl or not mapping:
+        return expl
+    s = str(expl)
+    placeholders = {k: f"__OPT_{k}__" for k in mapping.keys()}
+    for k, ph in placeholders.items():
+        s = s.replace(f"Option {k}", f"Option {ph}")
+    for k, ph in placeholders.items():
+        s = s.replace(f"Option {ph}", f"Option {mapping.get(k, k)}")
+    return s
+
+
+def rebalance_correct_options_evenly(quiz: dict) -> dict:
+    """
+    Post-process quiz so correct_option letters are evenly distributed across A/B/C/D.
+    This reorders each question's options while preserving the correct answer content.
+    """
+    if not isinstance(quiz, dict):
+        return quiz
+    questions = quiz.get("questions")
+    if not isinstance(questions, list) or not questions:
+        return quiz
+
+    # Cycle targets A,B,C,D across questions (stable, deterministic).
+    targets = ["A", "B", "C", "D"]
+    for i, q in enumerate(questions):
+        if not isinstance(q, dict):
+            continue
+        opts = q.get("options")
+        if not isinstance(opts, list) or len(opts) != 4:
+            continue
+        corr = q.get("correct_option")
+        if corr not in ANSWER_LETTERS:
+            continue
+
+        # Clean option strings (avoid "A) " etc).
+        clean_opts = [_strip_option_prefix(o) for o in opts]
+        q["options"] = clean_opts
+
+        old_idx = ANSWER_LETTERS.index(corr)
+        target_letter = targets[i % 4]
+        target_idx = ANSWER_LETTERS.index(target_letter)
+        if old_idx == target_idx:
+            continue
+
+        # Compute permutation: move the old correct option to target index by rotation.
+        shift = target_idx - old_idx
+        new_opts = [None, None, None, None]  # type: ignore[list-item]
+        mapping: dict[str, str] = {}
+        for j in range(4):
+            nj = (j + shift) % 4
+            new_opts[nj] = clean_opts[j]
+            mapping[ANSWER_LETTERS[j]] = ANSWER_LETTERS[nj]
+
+        q["options"] = new_opts  # type: ignore[assignment]
+        q["correct_option"] = target_letter
+        if "explanation" in q and isinstance(q.get("explanation"), str):
+            q["explanation"] = _remap_explanation_letters(q["explanation"], mapping)
+
+    quiz["questions"] = questions
+    return quiz
+
+
 def validate_quiz_shape(quiz, expected_count: int) -> dict:
     """Basic schema guard for generated quiz JSON."""
     if not isinstance(quiz, dict):
