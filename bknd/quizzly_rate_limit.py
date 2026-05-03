@@ -4,6 +4,7 @@ Daily generation limits per browser `client` id; Supabase logging uses `user_ip`
 
 from __future__ import annotations
 
+import ipaddress
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -35,6 +36,32 @@ def _secret(key: str) -> str | None:
     return str(v).strip() if v else None
 
 
+def _normalize_ip_token(raw: str) -> str:
+    s = (raw or "").strip()
+    if s.startswith("[") and "]" in s:
+        s = s[1 : s.index("]")]
+    return s.strip()
+
+
+def _is_global_public_ip(ip: str) -> bool:
+    """True if address is globally routable (useful for skipping RFC1918 hops in proxy chains)."""
+    s = _normalize_ip_token(ip)
+    if not s:
+        return False
+    try:
+        return bool(ipaddress.ip_address(s).is_global)
+    except ValueError:
+        return False
+
+
+def _pick_first_global_from_xff(xff: str) -> str | None:
+    for part in xff.split(","):
+        p = _normalize_ip_token(part)
+        if p and _is_global_public_ip(p):
+            return p
+    return None
+
+
 def rate_limit_disabled() -> bool:
     if os.environ.get("RATE_LIMIT_DISABLED", "").strip() in ("1", "true", "yes"):
         return True
@@ -46,32 +73,50 @@ def get_client_ip() -> str:
     """
     Best-effort client IP for analytics / geo.
 
-    Order:
-    1. ``st.context.ip_address`` (Streamlit ≥1.45; resolves proxy chains on Cloud).
-    2. ``X-Forwarded-For`` / ``X-Real-IP`` headers (first hop).
-
-    Local ``streamlit run`` often yields a LAN address or ``unknown``.
+    Streamlit / reverse proxies sometimes expose a **private** hop (e.g. ``192.168.x``) in
+    ``st.context.ip_address`` or as the **first** ``X-Forwarded-For`` entry. We prefer the
+    first **globally routable** address in ``X-Forwarded-For`` when the direct value is not
+    public, so remote users on Streamlit Cloud are more likely to get a public IP for geo.
     """
     try:
         ctx = getattr(st, "context", None)
         if ctx is None:
             return "unknown"
 
+        headers = getattr(ctx, "headers", None) or {}
+        xff = (headers.get("X-Forwarded-For") or headers.get("x-forwarded-for") or "").strip()
+
         ip_direct = getattr(ctx, "ip_address", None)
+        if ip_direct is not None:
+            ip = str(ip_direct).strip()
+            if ip and ip.lower() != "none" and _is_global_public_ip(ip):
+                return ip
+            if ip and ip.lower() != "none" and not _is_global_public_ip(ip) and xff:
+                g = _pick_first_global_from_xff(xff)
+                if g:
+                    return g
+                return ip
+
+        if xff:
+            g = _pick_first_global_from_xff(xff)
+            if g:
+                return g
+            first = _normalize_ip_token(xff.split(",")[0])
+            if first:
+                return first
+
         if ip_direct is not None:
             ip = str(ip_direct).strip()
             if ip and ip.lower() != "none":
                 return ip
 
-        headers = getattr(ctx, "headers", None)
         if not headers:
             return "unknown"
-        xff = (headers.get("X-Forwarded-For") or headers.get("x-forwarded-for") or "").strip()
-        if xff:
-            return xff.split(",")[0].strip() or "unknown"
         rip = (headers.get("X-Real-IP") or headers.get("x-real-ip") or "").strip()
         if rip:
-            return rip
+            r = _normalize_ip_token(rip)
+            if r:
+                return r
     except Exception:
         pass
     return "unknown"
