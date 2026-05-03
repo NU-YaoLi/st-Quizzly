@@ -1,6 +1,7 @@
 import importlib
 import importlib.util
 import sys
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
 # Repo root must win on sys.path (Streamlit Cloud cwd is not always the project folder).
@@ -15,15 +16,41 @@ if sys.path[0] != _root_str:
 
 
 def _load_top_level_module(name: str, file_path: Path) -> None:
-    """Load a single-file module by path (avoids Python 3.14 import KeyError on Streamlit Cloud)."""
+    """Load a single-file module by path (avoids Python 3.14 import KeyError on Streamlit Cloud).
+
+    Uses ``SourceFileLoader`` instead of ``spec_from_file_location`` so execution matches the
+    normal import path and all module-level names (e.g. ``DAILY_GENERATION_LIMIT``) are bound.
+    """
+    path_str = str(file_path.resolve())
     if not file_path.is_file():
-        raise ImportError(f"Required file missing: {file_path}")
-    spec = importlib.util.spec_from_file_location(name, file_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Could not load spec for {name} from {file_path}")
+        raise ImportError(f"Required file missing: {path_str}")
+    loader = SourceFileLoader(name, path_str)
+    spec = importlib.util.spec_from_loader(name, loader, origin=path_str)
+    if spec is None:
+        raise ImportError(f"Could not create spec for {name} from {path_str}")
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
-    spec.loader.exec_module(mod)
+    loader.exec_module(mod)
+
+
+def _verify_quizzly_config() -> None:
+    mod = sys.modules.get("quizzly_config")
+    if mod is None:
+        raise ImportError("quizzly_config was not registered in sys.modules.")
+    required = (
+        "MIN_QUESTIONS",
+        "DAILY_GENERATION_LIMIT",
+        "ANSWER_LETTERS",
+        "SUPABASE_URL",
+        "QUIZZLY_MODEL",
+        "MODEL_PRICING_USD_PER_1K",
+    )
+    missing = [n for n in required if not hasattr(mod, n)]
+    if missing:
+        raise ImportError(
+            f"quizzly_config from {getattr(mod, '__file__', '?')} is missing names {missing}. "
+            "If this is Streamlit Cloud, confirm quizzly_config.py is committed and not overwritten."
+        )
 
 
 def _load_package(name: str, init_path: Path) -> None:
@@ -44,6 +71,7 @@ def _load_package(name: str, init_path: Path) -> None:
 
 
 _load_top_level_module("quizzly_config", _root / "quizzly_config.py")
+_verify_quizzly_config()
 _load_package("bknd", _root / "bknd" / "__init__.py")
 
 import streamlit as st
