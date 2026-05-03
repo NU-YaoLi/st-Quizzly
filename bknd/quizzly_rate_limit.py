@@ -67,6 +67,7 @@ def _pick_first_global_from_xff(xff: str) -> str | None:
 
 
 def rate_limit_disabled() -> bool:
+    """When True, daily generation caps are not enforced. Does not skip `quiz_generation_usage` logging."""
     if os.environ.get("RATE_LIMIT_DISABLED", "").strip() in ("1", "true", "yes"):
         return True
     v = _secret("RATE_LIMIT_DISABLED")
@@ -252,9 +253,6 @@ def record_successful_generation(
     usage: QuizGenerationUsageFields | None = None,
 ) -> str | None:
     """Insert one usage row. Returns error string or None on success."""
-    if rate_limit_disabled():
-        return None
-
     supabase = _client()
     if supabase is None:
         return None

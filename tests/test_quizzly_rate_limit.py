@@ -78,12 +78,25 @@ class TestDailyGenerationRateLimit(unittest.TestCase):
             self.assertFalse(r.allowed)
             self.assertIn("connection refused", r.message)
 
-    def test_record_skips_when_disabled(self):
-        with patch("bknd.quizzly_rate_limit.rate_limit_disabled", return_value=True):
+    def test_record_still_inserts_when_rate_limit_disabled(self):
+        """Disabling the daily cap must not skip analytics rows in quiz_generation_usage."""
+        mock_sb = MagicMock()
+        mock_sb.table.return_value.insert.return_value.execute.return_value = MagicMock()
+
+        with patch("bknd.quizzly_rate_limit.rate_limit_disabled", return_value=True), patch(
+            "bknd.quizzly_rate_limit._client",
+            return_value=mock_sb,
+        ), patch(
+            "bknd.quizzly_rate_limit.ensure_user_ip_geo_and_read",
+            return_value=(None, None, None),
+        ), patch("bknd.quizzly_rate_limit.st") as mock_st:
+            mock_st.session_state = {}
             from bknd.quizzly_rate_limit import record_successful_generation
 
-            err = record_successful_generation("any-uuid")
+            err = record_successful_generation("00000000-0000-0000-0000-0000000000ab")
             self.assertIsNone(err)
+            mock_sb.table.assert_called_with("quiz_generation_usage")
+            mock_sb.table.return_value.insert.assert_called_once()
 
     def test_record_insert_calls_table(self):
         mock_sb = MagicMock()
