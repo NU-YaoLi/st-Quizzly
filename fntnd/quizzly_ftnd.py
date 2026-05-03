@@ -536,6 +536,16 @@ def main():
             "Transform passive reading into active mastery. Upload documents or links to generate a verified, targeted quiz based on Bloom's Taxonomy."
         )
 
+        _usage_log_err = st.session_state.get("_usage_record_error")
+        if _usage_log_err:
+            st.error(
+                f"**Usage was not saved to Supabase** (last run). "
+                f"{_usage_log_err}"
+            )
+            if st.button("Dismiss", key="dismiss_usage_log_error"):
+                st.session_state.pop("_usage_record_error", None)
+                st.rerun()
+
         # Dedicated slot so workflow progress is always visible in the same place.
         workflow_slot = st.container()
 
@@ -812,6 +822,7 @@ def main():
                     usage=_usage_log,
                 )
                 if _rl_err:
+                    st.session_state["_usage_record_error"] = _rl_err
                     st.session_state["workflow_status_lines"].append(
                         f"Warning: could not record usage in Supabase ({_rl_err})."
                     )
@@ -821,6 +832,11 @@ def main():
                     )
                     if debug_enabled:
                         st.info("Set DEBUG=1 in secrets for more context, or check Streamlit / Supabase logs.")
+                else:
+                    st.session_state.pop("_usage_record_error", None)
+                    st.session_state["workflow_status_lines"].append(
+                        "Usage saved: one row in Supabase `quiz_generation_usage`."
+                    )
                 try:
                     live_status.update(
                         label=st.session_state["workflow_status_label"], state="complete", expanded=False

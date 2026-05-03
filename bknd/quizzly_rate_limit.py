@@ -5,6 +5,7 @@ Daily generation limits per browser `client` id; Supabase logging uses `user_ip`
 from __future__ import annotations
 
 import ipaddress
+import math
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -38,6 +39,15 @@ def _secret(key: str) -> str | None:
         pass
     v = os.environ.get(key)
     return str(v).strip() if v else None
+
+
+def _first_secret(*keys: str) -> str | None:
+    """Return the first non-empty secret (Streamlit secrets, then os.environ)."""
+    for k in keys:
+        v = _secret(k)
+        if v:
+            return v
+    return None
 
 
 def _normalize_ip_token(raw: str) -> str:
@@ -128,8 +138,13 @@ def get_client_ip() -> str:
 
 
 def _supabase_config() -> tuple[str | None, str | None]:
-    url = (_secret("SUPABASE_URL") or SUPABASE_URL or "").strip().rstrip("/") or None
-    key = _secret("SUPABASE_SERVICE_ROLE_KEY")
+    url = _first_secret("SUPABASE_URL", "supabase_url") or (SUPABASE_URL or "").strip().rstrip("/") or None
+    # Service role key is required for inserts; allow common secret name typos.
+    key = _first_secret(
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "supabase_service_role_key",
+        "SUPABASE_SERVICE_KEY",
+    )
     return url, key
 
 
@@ -145,6 +160,25 @@ def _client():
 def supabase_admin_client():
     """Configured Supabase client (service role), or None if secrets/url missing."""
     return _client()
+
+
+def _json_safe_row(row: dict) -> dict:
+    """PostgREST JSON cannot encode float NaN; map to null. Coerce pathological floats."""
+    out: dict = {}
+    for k, v in row.items():
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            out[k] = None
+        else:
+            out[k] = v
+    return out
+
+
+def _empty_insert_response_help() -> str:
+    return (
+        "Insert returned no row. Confirm Streamlit secrets use **SUPABASE_SERVICE_ROLE_KEY** "
+        "(the service_role JWT from Supabase Settings → API — not the anon key), "
+        "that **SUPABASE_URL** matches your project, and RLS allows inserts for the service role."
+    )
 
 
 def utc_day_start() -> datetime:
@@ -279,7 +313,9 @@ def record_successful_generation(
 
     row_min: dict = {"user_ip_id": uid}
     try:
-        supabase.table(TABLE_NAME).insert(row_full).execute()
+        res = supabase.table(TABLE_NAME).insert(_json_safe_row(row_full)).select("id").execute()
+        if not (getattr(res, "data", None) or []):
+            return _empty_insert_response_help()
         st.session_state[_SESSION_USER_IP_ID] = uid
         return None
     except Exception as e:
@@ -287,14 +323,18 @@ def record_successful_generation(
         if "42703" in msg or ("does not exist" in msg.lower() and "column" in msg.lower()):
             try:
                 slim = {k: v for k, v in row_full.items() if k not in ("country", "region", "city")}
-                supabase.table(TABLE_NAME).insert(slim).execute()
+                res2 = supabase.table(TABLE_NAME).insert(_json_safe_row(slim)).select("id").execute()
+                if not (getattr(res2, "data", None) or []):
+                    return _empty_insert_response_help()
                 st.session_state[_SESSION_USER_IP_ID] = uid
                 return None
             except Exception as e2:
                 msg2 = f"{type(e2).__name__}: {e2!s}"
                 if "42703" in msg2 or ("does not exist" in msg2.lower() and "column" in msg2.lower()):
                     try:
-                        supabase.table(TABLE_NAME).insert(row_min).execute()
+                        res3 = supabase.table(TABLE_NAME).insert(_json_safe_row(row_min)).select("id").execute()
+                        if not (getattr(res3, "data", None) or []):
+                            return _empty_insert_response_help()
                         st.session_state[_SESSION_USER_IP_ID] = uid
                         return None
                     except Exception as e3:

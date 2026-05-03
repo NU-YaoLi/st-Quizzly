@@ -4,6 +4,15 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 
+def _mock_supabase_insert_ok():
+    """Chain: table().insert().select().execute() -> response with data."""
+    mock_sb = MagicMock()
+    resp = MagicMock()
+    resp.data = [{"id": "00000000-0000-0000-0000-000000000099"}]
+    mock_sb.table.return_value.insert.return_value.select.return_value.execute.return_value = resp
+    return mock_sb
+
+
 class TestDailyGenerationRateLimit(unittest.TestCase):
     def test_disabled_always_allows(self):
         with patch("bknd.quizzly_rate_limit.rate_limit_disabled", return_value=True):
@@ -91,8 +100,7 @@ class TestDailyGenerationRateLimit(unittest.TestCase):
 
     def test_record_still_inserts_when_rate_limit_disabled(self):
         """Disabling the daily cap must not skip analytics rows in quiz_generation_usage."""
-        mock_sb = MagicMock()
-        mock_sb.table.return_value.insert.return_value.execute.return_value = MagicMock()
+        mock_sb = _mock_supabase_insert_ok()
 
         with patch("bknd.quizzly_rate_limit.rate_limit_disabled", return_value=True), patch(
             "bknd.quizzly_rate_limit._client",
@@ -110,8 +118,7 @@ class TestDailyGenerationRateLimit(unittest.TestCase):
             mock_sb.table.return_value.insert.assert_called_once()
 
     def test_record_insert_calls_table(self):
-        mock_sb = MagicMock()
-        mock_sb.table.return_value.insert.return_value.execute.return_value = MagicMock()
+        mock_sb = _mock_supabase_insert_ok()
 
         with patch("bknd.quizzly_rate_limit.rate_limit_disabled", return_value=False), patch(
             "bknd.quizzly_rate_limit._client",
