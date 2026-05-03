@@ -25,6 +25,8 @@ from bknd.quizzly_analytics import (
 
 _SESSION_UNLOCK = "quizzly_analytics_unlocked"
 _ANALYTICS_REFRESH_NONCE = "_analytics_refresh_nonce"
+# Fixed viewport height so large tables scroll inside the widget (not the whole page).
+_DA_TABLE_HEIGHT_PX = 440
 
 
 def _analytics_password() -> str:
@@ -295,7 +297,12 @@ def render_data_analysis_view() -> None:
                     st.plotly_chart(fig_cy, use_container_width=True)
 
             st.subheader("Visitor table")
-            st.dataframe(udf, use_container_width=True, hide_index=True)
+            st.dataframe(
+                udf,
+                use_container_width=True,
+                hide_index=True,
+                height=_DA_TABLE_HEIGHT_PX,
+            )
 
     with tab_quiz:
         st.markdown(
@@ -375,7 +382,12 @@ def render_data_analysis_view() -> None:
                 }
             )
             st.subheader("All generations (filtered)")
-            st.dataframe(quiz_show.sort_values("Created (UTC)", ascending=False), use_container_width=True, hide_index=True)
+            st.dataframe(
+                quiz_show.sort_values("Created (UTC)", ascending=False),
+                use_container_width=True,
+                hide_index=True,
+                height=_DA_TABLE_HEIGHT_PX,
+            )
 
             if n_sel > 0:
                 st.subheader("Mode × material mix")
@@ -392,6 +404,7 @@ def render_data_analysis_view() -> None:
                     ),
                     use_container_width=True,
                     hide_index=True,
+                    height=_DA_TABLE_HEIGHT_PX,
                 )
                 labels = grp["generation_mode"].astype(str) + " · " + grp["material_source"].astype(str)
                 fig_ms = go.Figure(data=[go.Bar(x=labels, y=grp["generations"], marker_color="#00cc96")])
@@ -536,7 +549,12 @@ def render_data_analysis_view() -> None:
             show_df = df_daily.drop(columns=["Cumulative spend (USD)"], errors="ignore").sort_values(
                 "Day (UTC)", ascending=False
             )
-            st.dataframe(show_df, use_container_width=True, hide_index=True)
+            st.dataframe(
+                show_df,
+                use_container_width=True,
+                hide_index=True,
+                height=_DA_TABLE_HEIGHT_PX,
+            )
 
     st.divider()
     st.markdown(
