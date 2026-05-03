@@ -5,11 +5,11 @@ from unittest.mock import MagicMock, patch
 
 
 def _mock_supabase_insert_ok():
-    """Chain: table().insert().select().execute() -> response with data."""
+    """Chain: table().insert().execute() -> response with data (postgrest 2.x)."""
     mock_sb = MagicMock()
     resp = MagicMock()
     resp.data = [{"id": "00000000-0000-0000-0000-000000000099"}]
-    mock_sb.table.return_value.insert.return_value.select.return_value.execute.return_value = resp
+    mock_sb.table.return_value.insert.return_value.execute.return_value = resp
     return mock_sb
 
 

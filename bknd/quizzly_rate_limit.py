@@ -313,7 +313,9 @@ def record_successful_generation(
 
     row_min: dict = {"user_ip_id": uid}
     try:
-        res = supabase.table(TABLE_NAME).insert(_json_safe_row(row_full)).select("id").execute()
+        # postgrest 2.x: ``insert()`` returns a request builder with only ``execute()`` (no ``select``).
+        # Default ``returning=representation`` still returns the new row in ``res.data``.
+        res = supabase.table(TABLE_NAME).insert(_json_safe_row(row_full)).execute()
         if not (getattr(res, "data", None) or []):
             return _empty_insert_response_help()
         st.session_state[_SESSION_USER_IP_ID] = uid
@@ -323,7 +325,7 @@ def record_successful_generation(
         if "42703" in msg or ("does not exist" in msg.lower() and "column" in msg.lower()):
             try:
                 slim = {k: v for k, v in row_full.items() if k not in ("country", "region", "city")}
-                res2 = supabase.table(TABLE_NAME).insert(_json_safe_row(slim)).select("id").execute()
+                res2 = supabase.table(TABLE_NAME).insert(_json_safe_row(slim)).execute()
                 if not (getattr(res2, "data", None) or []):
                     return _empty_insert_response_help()
                 st.session_state[_SESSION_USER_IP_ID] = uid
@@ -332,7 +334,7 @@ def record_successful_generation(
                 msg2 = f"{type(e2).__name__}: {e2!s}"
                 if "42703" in msg2 or ("does not exist" in msg2.lower() and "column" in msg2.lower()):
                     try:
-                        res3 = supabase.table(TABLE_NAME).insert(_json_safe_row(row_min)).select("id").execute()
+                        res3 = supabase.table(TABLE_NAME).insert(_json_safe_row(row_min)).execute()
                         if not (getattr(res3, "data", None) or []):
                             return _empty_insert_response_help()
                         st.session_state[_SESSION_USER_IP_ID] = uid
