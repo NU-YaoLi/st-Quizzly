@@ -2,12 +2,13 @@
 Structured fields logged per successful quiz generation (Supabase `quiz_generation_usage`).
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass, fields
 
+# Avoid ``from __future__ import annotations`` here: on Python 3.14 it can break
+# ``@dataclass`` module resolution (sys.modules lookup during class body processing).
 
-@dataclass
+
+@dataclass()
 class QuizGenerationUsageFields:
     """Optional analytics columns; omitted keys can be stored as NULL."""
 

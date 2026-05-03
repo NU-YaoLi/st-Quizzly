@@ -10,9 +10,22 @@ if _root_str not in sys.path:
 # Fail fast with ImportError if this file is missing (Cloud cwd issues are handled via sys.path above).
 import quizzly_config  # noqa: F401
 
+import importlib
+
 import streamlit as st
 
 st.set_page_config(page_title="Quizzly", page_icon="📖", layout="wide")
+
+# Eager-load backend modules before the UI import graph. Python 3.14 on Streamlit Cloud
+# can otherwise raise KeyError / incomplete ``sys.modules`` during nested imports.
+for _mod in (
+    "bknd",
+    "bknd.quizzly_usage_log",
+    "bknd.quizzly_user_ip",
+    "bknd.quizzly_question_upldprcs",
+    "bknd.quizzly_rate_limit",
+):
+    importlib.import_module(_mod)
 
 from fntnd.quizzly_ftnd import main
 
