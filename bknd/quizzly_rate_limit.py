@@ -138,7 +138,8 @@ def get_client_ip() -> str:
     Best-effort client IP for analytics / geo.
 
     Primary strategy (Streamlit Cloud friendly):
-    - Ask the **browser** for its public IP via `https://api.ipify.org?format=json`.
+    - Use a browser-fetched public IP stored in ``st.session_state["_quizzly_public_ip_js"]``.
+      (The frontend hydrates this using `streamlit-javascript`.)
 
     ``st.context.ip_address`` is often a **private** hop when Streamlit runs behind a proxy
     (e.g. Streamlit Community Cloud). We therefore prefer, in order:
@@ -156,24 +157,9 @@ def get_client_ip() -> str:
     you will only see RFC1918 addresses — that is an infrastructure limit, not fixable in Python.
     """
     try:
-        # Browser-side public IP (works when server-side headers are private only).
-        # Cache per session so we don't re-fetch on every rerun.
         cached = st.session_state.get("_quizzly_public_ip_js")
         if isinstance(cached, str) and cached.strip():
             return cached.strip()
-        try:
-            from streamlit_javascript import st_javascript  # type: ignore
-
-            script = 'await fetch("https://api.ipify.org?format=json").then(r => r.json())'
-            res = st_javascript(script)
-            if isinstance(res, dict) and res.get("ip"):
-                ip_js = str(res["ip"]).strip()
-                if ip_js:
-                    st.session_state["_quizzly_public_ip_js"] = ip_js
-                    return ip_js
-        except Exception:
-            # If the component isn't available yet (or blocked), fall back to server-side attempts.
-            pass
 
         ctx = getattr(st, "context", None)
         if ctx is None:

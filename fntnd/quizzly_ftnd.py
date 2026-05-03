@@ -104,6 +104,20 @@ def main():
     debug_enabled = bool(st.secrets.get("DEBUG", False)) or (os.environ.get("DEBUG") == "1")
     view = (qp.get("view") or "").strip().lower()
 
+    # Hydrate a public client IP via browser JS (Streamlit Cloud often only exposes private hops server-side).
+    # This must run in the frontend render flow (not deep inside button-click handlers) to avoid "nothing happens"
+    # first-run behavior from custom components returning None before the next rerun.
+    try:
+        from streamlit_javascript import st_javascript  # type: ignore
+
+        if not st.session_state.get("_quizzly_public_ip_js"):
+            script = 'await fetch("https://api.ipify.org?format=json").then(r => r.json())'
+            res = st_javascript(script)
+            if isinstance(res, dict) and res.get("ip"):
+                st.session_state["_quizzly_public_ip_js"] = str(res["ip"]).strip()
+    except Exception:
+        pass
+
     # If Streamlit reset our session_state (WebSocket reconnect / idle), try to rehydrate
     # from cached/disk state using URL params.
     if quiz_id and st.session_state.get("quiz_data") is None:
