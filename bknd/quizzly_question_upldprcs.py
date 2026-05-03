@@ -10,10 +10,6 @@ from urllib.parse import urlparse
 import requests
 import streamlit as st
 from bs4 import BeautifulSoup
-from docx import Document
-from PIL import Image
-from pptx import Presentation
-from reportlab.pdfgen import canvas
 
 from quizzly_config import MAX_WEB_URL_SLOTS, WEB_CHARS_PER_PAGE, WEB_TEXT_PER_URL_CAP
 
@@ -21,9 +17,8 @@ PENDING_REMOVE_URL_INDEX = "_pending_remove_url_index"
 MAX_REDIRECTS = 5
 MAX_WEB_RESPONSE_BYTES = 2_000_000  # 2MB cap to prevent huge-page DoS
 
-# Defensive: prevent decompression-bomb style images from consuming huge RAM.
-# (Pillow raises DecompressionBombError / warnings when exceeded.)
-Image.MAX_IMAGE_PIXELS = 20_000_000
+# python-docx, Pillow, python-pptx, reportlab are imported inside conversion helpers so the
+# app can start on hosts where those wheels are missing for very new Python (e.g. 3.14).
 
 
 def apply_pending_web_url_removal() -> None:
@@ -219,6 +214,9 @@ def pseudo_pages_from_web_text(text: str) -> int:
 
 
 def docx_to_pdf(input_path: str) -> str:
+    from docx import Document
+    from reportlab.pdfgen import canvas
+
     output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.pdf")
 
     doc = Document(input_path)
@@ -238,6 +236,9 @@ def docx_to_pdf(input_path: str) -> str:
 
 
 def pptx_to_pdf(input_path: str) -> str:
+    from pptx import Presentation
+    from reportlab.pdfgen import canvas
+
     output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.pdf")
 
     prs = Presentation(input_path)
@@ -260,6 +261,11 @@ def pptx_to_pdf(input_path: str) -> str:
 
 
 def image_to_pdf(input_path: str) -> str:
+    from PIL import Image
+
+    # Defensive: prevent decompression-bomb style images from consuming huge RAM.
+    Image.MAX_IMAGE_PIXELS = 20_000_000
+
     output_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.pdf")
 
     image = Image.open(input_path).convert("RGB")

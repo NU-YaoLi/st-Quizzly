@@ -12,7 +12,11 @@ from datetime import datetime, timedelta, timezone
 import streamlit as st
 
 from bknd.quizzly_usage_log import QuizGenerationUsageFields
-from bknd.quizzly_user_ip import ensure_user_ip_geo_and_read, get_or_create_user_ip_id
+from bknd.quizzly_user_ip import (
+    ensure_user_ip_geo_and_read,
+    get_or_create_user_ip_id,
+    lookup_user_ip_id_only,
+)
 from quizzly_config import DAILY_GENERATION_LIMIT, SUPABASE_URL
 
 TABLE_NAME = "quiz_generation_usage"
@@ -207,20 +211,17 @@ def check_daily_generation_allowed() -> RateLimitResult:
         return RateLimitResult(True, used_today=0)
 
     ip = get_client_ip()
-    uid, uerr = get_or_create_user_ip_id(supabase, ip)
+    # Lookup only: do not insert ``user_ip`` here (insert on successful generation only).
+    uid = lookup_user_ip_id_only(supabase, ip)
     if uid:
         st.session_state[_SESSION_USER_IP_ID] = uid
-    if not uid:
-        return RateLimitResult(
-            False,
-            message=(
-                "Could not verify the daily usage limit (user_ip). Please try again in a moment. "
-                f"({uerr or 'unknown error'})"
-            ),
-            used_today=None,
-        )
+    else:
+        st.session_state.pop(_SESSION_USER_IP_ID, None)
 
-    used, err = count_generations_today(uid)
+    if uid is None:
+        used, err = 0, None
+    else:
+        used, err = count_generations_today(uid)
     if err is not None:
         return RateLimitResult(
             False,

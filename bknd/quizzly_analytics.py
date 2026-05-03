@@ -282,6 +282,42 @@ def fetch_usage_detail_rows(
     return all_rows, None
 
 
+def fetch_user_ip_rows_created_between(
+    start_utc: datetime,
+    end_utc_exclusive: datetime,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """All ``user_ip`` rows whose ``created_at`` falls in [start_utc, end_utc_exclusive)."""
+    supabase = supabase_admin_client()
+    if supabase is None:
+        return [], "Supabase is not configured."
+
+    start_iso = start_utc.astimezone(timezone.utc).isoformat()
+    end_iso = end_utc_exclusive.astimezone(timezone.utc).isoformat()
+    rows: list[dict[str, Any]] = []
+    page = 0
+    page_size = 1000
+    try:
+        while True:
+            res = (
+                supabase.table("user_ip")
+                .select("id,ip,country,region,city,created_at")
+                .gte("created_at", start_iso)
+                .lt("created_at", end_iso)
+                .range(page * page_size, (page + 1) * page_size - 1)
+                .execute()
+            )
+            batch = res.data or []
+            rows.extend(batch)
+            if len(batch) < page_size:
+                break
+            page += 1
+            if page > 500:
+                break
+        return rows, None
+    except Exception as e:
+        return [], str(e)
+
+
 def fetch_user_ip_rows(
     user_ip_ids: list[str],
 ) -> tuple[dict[str, dict[str, Any]], str | None]:

@@ -14,6 +14,7 @@ create table if not exists public.user_ip (
 );
 
 create index if not exists user_ip_ip_idx on public.user_ip (ip);
+create index if not exists user_ip_created_at_idx on public.user_ip (created_at desc);
 
 comment on column public.user_ip.region is 'State / province (geo provider dependent)';
 

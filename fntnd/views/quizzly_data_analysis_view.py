@@ -18,11 +18,13 @@ from bknd.quizzly_analytics import (
     fetch_raw_events,
     fetch_usage_detail_rows,
     fetch_user_ip_rows,
+    fetch_user_ip_rows_created_between,
     hour_of_day_counts,
     period_bounds,
 )
 
 _SESSION_UNLOCK = "quizzly_analytics_unlocked"
+_ANALYTICS_REFRESH_NONCE = "_analytics_refresh_nonce"
 
 
 def _analytics_password() -> str:
@@ -30,24 +32,33 @@ def _analytics_password() -> str:
 
 
 @st.cache_data(ttl=90, show_spinner="Loading daily aggregates…")
-def _cached_daily_stats(ts_start: float, ts_end: float) -> tuple[list[DailyRow], str | None]:
+def _cached_daily_stats(
+    ts_start: float, ts_end: float, _refresh_nonce: int = 0
+) -> tuple[list[DailyRow], str | None]:
     start = datetime.fromtimestamp(ts_start, tz=timezone.utc)
     end = datetime.fromtimestamp(ts_end, tz=timezone.utc)
     return fetch_daily_stats(start, end)
 
 
 @st.cache_data(ttl=90, show_spinner="Loading hourly distribution…")
-def _cached_raw_events(ts_start: float, ts_end: float):
+def _cached_raw_events(ts_start: float, ts_end: float, _refresh_nonce: int = 0):
     start = datetime.fromtimestamp(ts_start, tz=timezone.utc)
     end = datetime.fromtimestamp(ts_end, tz=timezone.utc)
     return fetch_raw_events(start, end)
 
 
 @st.cache_data(ttl=90, show_spinner="Loading detailed usage rows…")
-def _cached_usage_details(ts_start: float, ts_end: float):
+def _cached_usage_details(ts_start: float, ts_end: float, _refresh_nonce: int = 0):
     start = datetime.fromtimestamp(ts_start, tz=timezone.utc)
     end = datetime.fromtimestamp(ts_end, tz=timezone.utc)
     return fetch_usage_detail_rows(start, end)
+
+
+@st.cache_data(ttl=90, show_spinner="Loading user_ip registry…")
+def _cached_user_ips_period(ts_start: float, ts_end: float, _refresh_nonce: int = 0):
+    start = datetime.fromtimestamp(ts_start, tz=timezone.utc)
+    end = datetime.fromtimestamp(ts_end, tz=timezone.utc)
+    return fetch_user_ip_rows_created_between(start, end)
 
 
 def _fmt_location(meta: dict | None, snap_c: str | None, snap_r: str | None, snap_ct: str | None) -> str:
@@ -66,7 +77,26 @@ def _latest_snapshot(evs: list[dict], key: str) -> str | None:
     return None
 
 
-def _build_user_summary(detail_rows: list[dict], ip_meta: dict[str, dict]) -> pd.DataFrame:
+def _union_visitor_id_order(detail_rows: list[dict], uid_set: set[str]) -> list[str]:
+    """Sort visitor ids by generation count (desc), then id."""
+    by_uid: dict[str, list[dict]] = defaultdict(list)
+    for r in detail_rows:
+        uid = r.get("user_ip_id")
+        if uid:
+            by_uid[str(uid)].append(r)
+
+    def key_fn(u: str) -> tuple[int, str]:
+        return (-len(by_uid.get(u, [])), u)
+
+    return sorted(uid_set, key=key_fn)
+
+
+def _build_visitor_table(
+    detail_rows: list[dict],
+    ordered_uids: list[str],
+    ip_meta: dict[str, dict],
+) -> pd.DataFrame:
+    """One row per ``ordered_uids``; generations/spend from ``detail_rows`` in range."""
     by_uid: dict[str, list[dict]] = defaultdict(list)
     for r in detail_rows:
         uid = r.get("user_ip_id")
@@ -74,7 +104,8 @@ def _build_user_summary(detail_rows: list[dict], ip_meta: dict[str, dict]) -> pd
             by_uid[str(uid)].append(r)
 
     out: list[dict] = []
-    for uid, evs in sorted(by_uid.items(), key=lambda x: (-len(x[1]), x[0])):
+    for uid in ordered_uids:
+        evs = by_uid.get(uid, [])
         meta = ip_meta.get(uid) or {}
         ip_disp = meta.get("ip") or "—"
         n = len(evs)
@@ -140,7 +171,7 @@ def render_data_analysis_view() -> None:
     st.caption(
         "Estimated OpenAI spend (from in-app model pricing) and activity across **all** visitors. "
         "Times are **UTC**. Geo uses ip-api.com and ipwho.is (HTTPS fallback). "
-        "Numbers are cached briefly — use **Refresh data** after new generations or DB changes."
+        "Numbers are cached briefly — click **Refresh data** to force a new read from Supabase."
     )
     c_lock, c_refresh, _ = st.columns([1, 1, 2])
     with c_lock:
@@ -150,11 +181,11 @@ def render_data_analysis_view() -> None:
     with c_refresh:
         if st.button(
             "Refresh data",
-            help="Clear cached Supabase queries and reload (use after new rows in the database).",
+            help="Bypass analytics cache and reload from Supabase (new generations or manual SQL inserts).",
         ):
-            _cached_daily_stats.clear()
-            _cached_raw_events.clear()
-            _cached_usage_details.clear()
+            st.session_state[_ANALYTICS_REFRESH_NONCE] = (
+                int(st.session_state.get(_ANALYTICS_REFRESH_NONCE, 0)) + 1
+            )
             st.rerun()
 
     period = st.selectbox(
@@ -179,8 +210,9 @@ def render_data_analysis_view() -> None:
     ts0 = start_dt.timestamp()
     ts1 = end_ex.timestamp()
 
-    rows, err = _cached_daily_stats(ts0, ts1)
-    detail_rows, detail_err = _cached_usage_details(ts0, ts1)
+    _nonce = int(st.session_state.get(_ANALYTICS_REFRESH_NONCE, 0))
+    rows, err = _cached_daily_stats(ts0, ts1, _nonce)
+    detail_rows, detail_err = _cached_usage_details(ts0, ts1, _nonce)
 
     if err:
         st.error(err)
@@ -205,25 +237,41 @@ def render_data_analysis_view() -> None:
     tab_user, tab_quiz, tab_cost = st.tabs(["User", "Quiz", "Cost"])
 
     with tab_user:
-        st.markdown("**Visitors** — IP, coarse location, generation counts, and estimated spend.")
+        st.markdown(
+            "**Visitors** — IP, coarse location, and spend. "
+            "Rows include every **`user_ip`** first seen in this UTC range **plus** any IP "
+            "with **`quiz_generation_usage`** here (even if first seen earlier). "
+            "**0** generations means no completed run linked to that IP in this range."
+        )
+        ip_period_rows, ip_per_err = _cached_user_ips_period(ts0, ts1, _nonce)
+        if ip_per_err:
+            st.warning(f"Could not load `user_ip` rows for this period: {ip_per_err}")
+
+        dr = detail_rows or []
+        usage_uid_set = {str(r.get("user_ip_id")) for r in dr if r.get("user_ip_id")}
+        period_uid_set = {str(r.get("id")) for r in (ip_period_rows or []) if r.get("id")}
+        union_set = usage_uid_set | period_uid_set
+
         if detail_err:
             st.warning(f"Could not load usage detail: {detail_err}")
-        elif not detail_rows:
+
+        if not union_set:
             st.info(
-                "No quiz generations in this window yet — widen the range or run **Generate & Verify Quiz**."
+                "No visitor IPs match this window — widen the **time range** or generate a quiz "
+                "(which creates `user_ip` when a run completes)."
             )
         else:
-            uids = [str(r.get("user_ip_id")) for r in detail_rows if r.get("user_ip_id")]
-            ip_meta, ip_err = fetch_user_ip_rows(uids)
-            if ip_err:
-                st.warning(ip_err)
-            udf = _build_user_summary(detail_rows, ip_meta)
+            ordered = _union_visitor_id_order(dr, union_set)
+            ip_meta, meta_err = fetch_user_ip_rows(ordered)
+            if meta_err:
+                st.warning(meta_err)
+            udf = _build_visitor_table(dr, ordered, ip_meta)
             tgen = int(udf["Generations"].sum())
             tspend = float(udf["Total est. spend (USD)"].sum())
             nu = len(udf)
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Distinct visitors (with usage)", f"{nu:,}")
-            m2.metric("Total generations", f"{tgen:,}")
+            m1.metric("Visitor rows in table", f"{nu:,}")
+            m2.metric("Total generations (in range)", f"{tgen:,}")
             m3.metric("Total est. spend", f"${tspend:,.2f}")
             m4.metric("Avg spend / generation", f"${(tspend / tgen if tgen else 0):,.4f}")
 
@@ -241,7 +289,7 @@ def render_data_analysis_view() -> None:
                         title="Visitors by country (from user_ip / snapshots)",
                         height=380,
                         xaxis_tickangle=-28,
-                        yaxis_title="Visitors",
+                        yaxis_title="Visitor rows",
                         margin=dict(l=10, r=10, t=48, b=10),
                     )
                     st.plotly_chart(fig_cy, use_container_width=True)
@@ -457,7 +505,7 @@ def render_data_analysis_view() -> None:
             )
             st.plotly_chart(fig_c, use_container_width=True)
 
-            raw_ev, herr = _cached_raw_events(ts0, ts1)
+            raw_ev, herr = _cached_raw_events(ts0, ts1, _nonce)
             if herr:
                 st.warning(herr)
             elif raw_ev:
@@ -495,8 +543,9 @@ def render_data_analysis_view() -> None:
         """
 **How this works**
 
-- Each successful **Generate & Verify Quiz** inserts one row into **`quiz_generation_usage`**, linked to **`user_ip`**, with a **geo snapshot** (`country`, `region`, `city`) when available.
-- **`user_ip`** is refreshed when geo was missing (HTTPS fallback helps when HTTP lookups are blocked).
+- Each successful **Generate & Verify Quiz** inserts one row into **`quiz_generation_usage`** and ensures a **`user_ip`** row for the client IP (geo snapshot when available).
+- Daily limits only **look up** existing **`user_ip`** for counting — they no longer create **`user_ip`** on every button click (avoids orphan IPs without a completed generation).
+- **User tab** lists IPs **first seen** in the selected UTC window **union** IPs that have usage in that window.
 - Spend is **estimated** from `MODEL_PRICING_USD_PER_1K` in `quizzly_config.py`, not your OpenAI invoice.
 - Protect Supabase and this page (password + strong deployment secrets).
         """

@@ -27,8 +27,8 @@ class TestDailyGenerationRateLimit(unittest.TestCase):
             "bknd.quizzly_rate_limit._supabase_config",
             return_value=("https://example.supabase.co", "sr_key"),
         ), patch("bknd.quizzly_rate_limit._client", return_value=MagicMock()), patch(
-            "bknd.quizzly_rate_limit.get_or_create_user_ip_id",
-            return_value=("00000000-0000-0000-0000-000000000001", None),
+            "bknd.quizzly_rate_limit.lookup_user_ip_id_only",
+            return_value="00000000-0000-0000-0000-000000000001",
         ), patch(
             "bknd.quizzly_rate_limit.count_generations_today",
             return_value=(2, None),
@@ -45,8 +45,8 @@ class TestDailyGenerationRateLimit(unittest.TestCase):
             "bknd.quizzly_rate_limit._supabase_config",
             return_value=("https://example.supabase.co", "sr_key"),
         ), patch("bknd.quizzly_rate_limit._client", return_value=MagicMock()), patch(
-            "bknd.quizzly_rate_limit.get_or_create_user_ip_id",
-            return_value=("00000000-0000-0000-0000-000000000001", None),
+            "bknd.quizzly_rate_limit.lookup_user_ip_id_only",
+            return_value="00000000-0000-0000-0000-000000000001",
         ), patch(
             "bknd.quizzly_rate_limit.count_generations_today",
             return_value=(3, None),
@@ -65,8 +65,8 @@ class TestDailyGenerationRateLimit(unittest.TestCase):
             "bknd.quizzly_rate_limit._supabase_config",
             return_value=("https://example.supabase.co", "sr_key"),
         ), patch("bknd.quizzly_rate_limit._client", return_value=MagicMock()), patch(
-            "bknd.quizzly_rate_limit.get_or_create_user_ip_id",
-            return_value=("00000000-0000-0000-0000-000000000001", None),
+            "bknd.quizzly_rate_limit.lookup_user_ip_id_only",
+            return_value="00000000-0000-0000-0000-000000000001",
         ), patch(
             "bknd.quizzly_rate_limit.count_generations_today",
             return_value=(None, "connection refused"),

@@ -64,6 +64,33 @@ def _normalize_ip(ip: str) -> str:
     return ip
 
 
+def lookup_user_ip_id_only(supabase: Any, ip: str) -> str | None:
+    """
+    Return existing ``user_ip.id`` for this normalized IP string.
+    Does **not** insert or refresh geo — used for rate-limit checks so failed/aborted
+    generations do not create orphan ``user_ip`` rows.
+    """
+    if supabase is None:
+        return None
+    ip_key = _normalize_ip(ip)
+    if not ip_key or ip_key == "unknown":
+        ip_key = "unknown"
+    try:
+        res = (
+            supabase.table(USER_IP_TABLE)
+            .select("id")
+            .eq("ip", ip_key)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        if rows:
+            return str(rows[0]["id"])
+    except Exception:
+        pass
+    return None
+
+
 def get_or_create_user_ip_id(supabase: Any, ip: str) -> tuple[str | None, str | None]:
     """
     Return (user_ip row uuid as str, error_message).
