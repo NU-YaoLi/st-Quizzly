@@ -25,8 +25,22 @@ from bknd.quizzly_analytics import (
 
 _SESSION_UNLOCK = "quizzly_analytics_unlocked"
 _ANALYTICS_REFRESH_NONCE = "_analytics_refresh_nonce"
-# Fixed viewport height so large tables scroll inside the widget (not the whole page).
-_DA_TABLE_HEIGHT_PX = 440
+# Dataframe viewport: grow with data row count, show at most this many rows without inner scroll.
+_DA_MAX_VISIBLE_TABLE_ROWS = 10
+_DA_TABLE_HEADER_PX = 52
+_DA_TABLE_ROW_PX = 36
+
+
+def _da_table_height_px(num_rows: int) -> int:
+    """
+    Streamlit ``st.dataframe`` height in pixels: short for few rows, capped so at most
+    ``_DA_MAX_VISIBLE_TABLE_ROWS`` rows are visible; additional rows scroll inside the widget.
+    """
+    n = max(0, int(num_rows))
+    if n == 0:
+        return _DA_TABLE_HEADER_PX + _DA_TABLE_ROW_PX
+    shown = min(n, _DA_MAX_VISIBLE_TABLE_ROWS)
+    return _DA_TABLE_HEADER_PX + shown * _DA_TABLE_ROW_PX
 
 
 def _analytics_password() -> str:
@@ -310,7 +324,7 @@ def render_data_analysis_view() -> None:
                 udf,
                 width="stretch",
                 hide_index=True,
-                height=_DA_TABLE_HEIGHT_PX,
+                height=_da_table_height_px(len(udf)),
             )
 
     with tab_quiz:
@@ -391,11 +405,12 @@ def render_data_analysis_view() -> None:
                 }
             )
             st.subheader("All generations (filtered)")
+            _quiz_df = quiz_show.sort_values("Created (UTC)", ascending=False)
             st.dataframe(
-                quiz_show.sort_values("Created (UTC)", ascending=False),
+                _quiz_df,
                 width="stretch",
                 hide_index=True,
-                height=_DA_TABLE_HEIGHT_PX,
+                height=_da_table_height_px(len(_quiz_df)),
             )
 
             if n_sel > 0:
@@ -407,13 +422,14 @@ def render_data_analysis_view() -> None:
                 )
                 grp["avg_cost"] = grp["avg_cost"].apply(lambda x: round(float(x), 4) if pd.notna(x) else None)
                 grp["share %"] = (100.0 * grp["generations"] / float(n_sel)).round(1)
+                _mix_df = grp.rename(
+                    columns={"generation_mode": "Mode", "material_source": "Material", "avg_cost": "Avg cost"}
+                )
                 st.dataframe(
-                    grp.rename(
-                        columns={"generation_mode": "Mode", "material_source": "Material", "avg_cost": "Avg cost"}
-                    ),
+                    _mix_df,
                     width="stretch",
                     hide_index=True,
-                    height=_DA_TABLE_HEIGHT_PX,
+                    height=_da_table_height_px(len(_mix_df)),
                 )
                 labels = grp["generation_mode"].astype(str) + " · " + grp["material_source"].astype(str)
                 fig_ms = go.Figure(data=[go.Bar(x=labels, y=grp["generations"], marker_color="#00cc96")])
@@ -562,7 +578,7 @@ def render_data_analysis_view() -> None:
                 show_df,
                 width="stretch",
                 hide_index=True,
-                height=_DA_TABLE_HEIGHT_PX,
+                height=_da_table_height_px(len(show_df)),
             )
 
     st.divider()
