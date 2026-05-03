@@ -70,6 +70,20 @@ def _load_package(name: str, init_path: Path) -> None:
     spec.loader.exec_module(mod)
 
 
+def _load_module(name: str, file_path: Path) -> None:
+    """Load a .py file as module ``name`` (supports dotted names)."""
+    path_str = str(file_path.resolve())
+    if not file_path.is_file():
+        raise ImportError(f"Required module missing: {path_str}")
+    loader = SourceFileLoader(name, path_str)
+    spec = importlib.util.spec_from_loader(name, loader, origin=path_str)
+    if spec is None:
+        raise ImportError(f"Could not create spec for module {name} from {path_str}")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    loader.exec_module(mod)
+
+
 _load_top_level_module("quizzly_config", _root / "quizzly_config.py")
 _verify_quizzly_config()
 _load_package("bknd", _root / "bknd" / "__init__.py")
@@ -89,7 +103,28 @@ for _mod in (
 
 _load_package("fntnd", _root / "fntnd" / "__init__.py")
 
-main = importlib.import_module("fntnd.quizzly_ftnd").main
+# Explicitly load view modules to avoid Python 3.14 KeyError during normal import resolution.
+_load_package("fntnd.views", _root / "fntnd" / "views" / "__init__.py")
+_load_module(
+    "fntnd.views.quizzly_current_quiz_mistakes",
+    _root / "fntnd" / "views" / "quizzly_current_quiz_mistakes.py",
+)
+_load_module(
+    "fntnd.views.quizzly_data_analysis_view",
+    _root / "fntnd" / "views" / "quizzly_data_analysis_view.py",
+)
+_load_module(
+    "fntnd.views.quizzly_error_notebook_view",
+    _root / "fntnd" / "views" / "quizzly_error_notebook_view.py",
+)
+_load_module(
+    "fntnd.views.quizzly_howtouse_view",
+    _root / "fntnd" / "views" / "quizzly_howtouse_view.py",
+)
+
+# Then load the main frontend module by path.
+_load_module("fntnd.quizzly_ftnd", _root / "fntnd" / "quizzly_ftnd.py")
+main = sys.modules["fntnd.quizzly_ftnd"].main
 
 
 if __name__ == "__main__":
