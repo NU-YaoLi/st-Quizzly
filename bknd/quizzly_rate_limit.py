@@ -255,12 +255,17 @@ def record_successful_generation(
     """Insert one usage row. Returns error string or None on success."""
     supabase = _client()
     if supabase is None:
-        return None
+        return (
+            "Supabase is not configured — add SUPABASE_SERVICE_ROLE_KEY (and SUPABASE_URL if needed) "
+            "to Streamlit secrets so quiz_generation_usage rows can be inserted."
+        )
 
     uid = user_ip_id or st.session_state.get(_SESSION_USER_IP_ID)
     if not uid:
         ip = get_client_ip()
-        uid, _ = get_or_create_user_ip_id(supabase, ip)
+        uid, uerr = get_or_create_user_ip_id(supabase, ip)
+        if uerr:
+            return f"Could not create or look up user_ip: {uerr}"
     if not uid:
         return "Could not resolve user_ip_id for usage log."
 
@@ -275,6 +280,7 @@ def record_successful_generation(
     row_min: dict = {"user_ip_id": uid}
     try:
         supabase.table(TABLE_NAME).insert(row_full).execute()
+        st.session_state[_SESSION_USER_IP_ID] = uid
         return None
     except Exception as e:
         msg = f"{type(e).__name__}: {e!s}"
@@ -282,12 +288,14 @@ def record_successful_generation(
             try:
                 slim = {k: v for k, v in row_full.items() if k not in ("country", "region", "city")}
                 supabase.table(TABLE_NAME).insert(slim).execute()
+                st.session_state[_SESSION_USER_IP_ID] = uid
                 return None
             except Exception as e2:
                 msg2 = f"{type(e2).__name__}: {e2!s}"
                 if "42703" in msg2 or ("does not exist" in msg2.lower() and "column" in msg2.lower()):
                     try:
                         supabase.table(TABLE_NAME).insert(row_min).execute()
+                        st.session_state[_SESSION_USER_IP_ID] = uid
                         return None
                     except Exception as e3:
                         return str(e3)

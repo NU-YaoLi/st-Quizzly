@@ -120,10 +120,15 @@ def _build_visitor_table(
                 except (TypeError, ValueError):
                     pass
         total_c = sum(costs)
-        avg_c = total_c / n if n else 0.0
         sc = _latest_snapshot(evs, "country")
         sr = _latest_snapshot(evs, "region")
         sct = _latest_snapshot(evs, "city")
+        if n:
+            row_spend_total = round(total_c, 4)
+            row_spend_avg = round(total_c / n, 4)
+        else:
+            row_spend_total = None
+            row_spend_avg = None
         out.append(
             {
                 "IP": ip_disp,
@@ -132,8 +137,8 @@ def _build_visitor_table(
                 "Region": meta.get("region") or sr or "—",
                 "City": meta.get("city") or sct or "—",
                 "Generations": n,
-                "Total est. spend (USD)": round(total_c, 4),
-                "Avg spend / gen (USD)": round(avg_c, 4),
+                "Total est. spend (USD)": row_spend_total,
+                "Avg spend / gen (USD)": row_spend_avg,
             }
         )
     return pd.DataFrame(out)
@@ -268,9 +273,8 @@ def render_data_analysis_view() -> None:
             if meta_err:
                 st.warning(meta_err)
             udf = _build_visitor_table(dr, ordered, ip_meta)
-            udf_active = udf[udf["Generations"] > 0].copy()
             tgen = int(udf["Generations"].sum())
-            tspend = float(udf["Total est. spend (USD)"].sum())
+            tspend = float(pd.to_numeric(udf["Total est. spend (USD)"], errors="coerce").fillna(0).sum())
             nu = len(udf)
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Visitor rows in table", f"{nu:,}")
@@ -280,8 +284,8 @@ def render_data_analysis_view() -> None:
 
             if "Country" in udf.columns:
                 top_c = (
-                    udf_active[udf_active["Country"] != "—"]["Country"].value_counts().head(12)
-                    if len(udf_active)
+                    udf[udf["Country"] != "—"]["Country"].value_counts().head(12)
+                    if len(udf)
                     else pd.Series(dtype=int)
                 )
                 if len(top_c):
@@ -298,23 +302,16 @@ def render_data_analysis_view() -> None:
                     st.plotly_chart(fig_cy, width="stretch")
 
             st.subheader("Visitor table")
-            n_hidden = int(len(udf) - len(udf_active))
-            if udf_active.empty:
-                st.info(
-                    "No visitors had a completed generation in this window — "
-                    f"{len(udf):,} IP(s) with zero activity are not shown in the table."
-                )
-            else:
-                st.dataframe(
-                    udf_active,
-                    width="stretch",
-                    hide_index=True,
-                    height=_DA_TABLE_HEIGHT_PX,
-                )
-                if n_hidden > 0:
-                    st.caption(
-                        f"{n_hidden:,} visitor IP(s) with **0** generations in this window are hidden."
-                    )
+            st.caption(
+                "All IPs in this UTC window are listed. Spend columns are empty when there were "
+                "**no** completed generations in range for that IP."
+            )
+            st.dataframe(
+                udf,
+                width="stretch",
+                hide_index=True,
+                height=_DA_TABLE_HEIGHT_PX,
+            )
 
     with tab_quiz:
         st.markdown(

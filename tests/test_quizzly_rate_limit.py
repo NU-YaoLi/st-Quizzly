@@ -78,6 +78,17 @@ class TestDailyGenerationRateLimit(unittest.TestCase):
             self.assertFalse(r.allowed)
             self.assertIn("connection refused", r.message)
 
+    def test_record_returns_error_when_supabase_missing(self):
+        with patch("bknd.quizzly_rate_limit._client", return_value=None), patch(
+            "bknd.quizzly_rate_limit.st"
+        ) as mock_st:
+            mock_st.session_state = {}
+            from bknd.quizzly_rate_limit import record_successful_generation
+
+            err = record_successful_generation("00000000-0000-0000-0000-0000000000ab")
+            self.assertIsNotNone(err)
+            self.assertIn("SUPABASE_SERVICE_ROLE_KEY", err)
+
     def test_record_still_inserts_when_rate_limit_disabled(self):
         """Disabling the daily cap must not skip analytics rows in quiz_generation_usage."""
         mock_sb = MagicMock()

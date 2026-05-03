@@ -813,10 +813,14 @@ def main():
                 )
                 if _rl_err:
                     st.session_state["workflow_status_lines"].append(
-                        f"Warning: could not record daily usage for rate limit ({_rl_err})."
+                        f"Warning: could not record usage in Supabase ({_rl_err})."
+                    )
+                    st.warning(
+                        f"**Usage was not saved to the database** (quiz still works). "
+                        f"Details: {_rl_err}"
                     )
                     if debug_enabled:
-                        st.warning(f"Could not record daily usage: {_rl_err}")
+                        st.info("Set DEBUG=1 in secrets for more context, or check Streamlit / Supabase logs.")
                 try:
                     live_status.update(
                         label=st.session_state["workflow_status_label"], state="complete", expanded=False
