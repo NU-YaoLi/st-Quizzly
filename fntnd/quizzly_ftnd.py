@@ -186,9 +186,11 @@ def main():
                 })()
                 """
             ).strip()
+            # Note: older PyPI builds of `streamlit-javascript` only accept `(js_code, key)`,
+            # so we deliberately do NOT pass `default=` here. The component returns 0 until
+            # the JS resolves, which we treat the same as None below.
             res = st_javascript(
                 script,
-                default=None,
                 key="quizzly_public_ip_v4_async_iife",
             )
             if isinstance(res, dict) and res.get("ip"):
