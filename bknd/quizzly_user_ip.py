@@ -8,6 +8,7 @@ Some deployment environments block plain HTTP; HTTPS fallback fixes missing geo.
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 import requests
 
@@ -16,8 +17,10 @@ USER_IP_TABLE = "user_ip"
 
 def _lookup_ip_api_com(ip: str) -> tuple[str | None, str | None, str | None]:
     try:
+        # Percent-encode IPv6 (and odd tokens) so the path is unambiguous for all HTTP stacks.
+        enc = quote(ip, safe="")
         r = requests.get(
-            f"http://ip-api.com/json/{ip}",
+            f"http://ip-api.com/json/{enc}",
             params={"fields": "status,country,regionName,city,message"},
             timeout=4,
         )
@@ -33,7 +36,8 @@ def _lookup_ip_api_com(ip: str) -> tuple[str | None, str | None, str | None]:
 def _lookup_ipwho_is(ip: str) -> tuple[str | None, str | None, str | None]:
     """HTTPS fallback (works when HTTP to ip-api is blocked)."""
     try:
-        r = requests.get(f"https://ipwho.is/{ip}", timeout=4)
+        enc = quote(ip, safe="")
+        r = requests.get(f"https://ipwho.is/{enc}", timeout=4)
         r.raise_for_status()
         j = r.json()
         if not j.get("success"):

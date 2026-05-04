@@ -128,20 +128,53 @@ def main():
         if not st.session_state.get("_quizzly_public_ip_js"):
             # Try multiple IP endpoints (some are blocked in certain regions).
             script = """
-                const endpoints = [
-                  "https://api64.ipify.org?format=json",
-                  "https://ifconfig.co/json",
-                  "https://ipwho.is/?output=json",
-                  // Often blocked in some regions (e.g. parts of China); keep last as best-effort.
-                  "https://api.ipify.org?format=json",
-                ];
+                function isIPv4(s) {
+                  return /^(\\d{1,3}\\.){3}\\d{1,3}$/.test(String(s || "").trim());
+                }
+                function ipFromJson(j) {
+                  if (!j || typeof j !== "object") return "";
+                  const v = j.ip ?? j.IP ?? j.query;
+                  return v ? String(v).trim() : "";
+                }
                 async function firstIp() {
+                  // Prefer IPv4 when the network is dual-stack: api64 / many JSON APIs return IPv6 first.
+                  const v4Json = [
+                    // Often blocked in some regions (e.g. parts of China); try early when reachable.
+                    "https://api.ipify.org?format=json",
+                  ];
+                  const v4Text = [
+                    "https://checkip.amazonaws.com",
+                    "https://ipv4.icanhazip.com",
+                  ];
+                  for (const url of v4Json) {
+                    try {
+                      const r = await fetch(url, { cache: "no-store" });
+                      if (!r.ok) continue;
+                      const j = await r.json();
+                      const ip = ipFromJson(j);
+                      if (ip && isIPv4(ip)) return { ip };
+                    } catch (e) {}
+                  }
+                  for (const url of v4Text) {
+                    try {
+                      const r = await fetch(url, { cache: "no-store" });
+                      if (!r.ok) continue;
+                      const ip = (await r.text()).trim();
+                      if (ip && isIPv4(ip)) return { ip };
+                    } catch (e) {}
+                  }
+                  const endpoints = [
+                    "https://api64.ipify.org?format=json",
+                    "https://ifconfig.co/json",
+                    "https://ipwho.is/?output=json",
+                    "https://api.ipify.org?format=json",
+                  ];
                   for (const url of endpoints) {
                     try {
                       const r = await fetch(url, { cache: "no-store" });
                       if (!r.ok) continue;
                       const j = await r.json();
-                      const ip = (j && (j.ip || j.IP || j.query)) ? String(j.ip || j.IP || j.query).trim() : "";
+                      const ip = ipFromJson(j);
                       if (ip) return { ip };
                     } catch (e) {}
                   }
