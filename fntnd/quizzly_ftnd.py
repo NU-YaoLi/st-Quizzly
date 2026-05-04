@@ -2,6 +2,7 @@ import json
 import mimetypes
 import os
 import tempfile
+import textwrap
 import time
 import traceback
 import uuid
@@ -126,67 +127,81 @@ def main():
         from streamlit_javascript import st_javascript  # type: ignore
 
         if not st.session_state.get("_quizzly_public_ip_js"):
-            # Try multiple IP endpoints (some are blocked in certain regions).
-            script = """
-                function isIPv4(s) {
-                  return /^(\\d{1,3}\\.){3}\\d{1,3}$/.test(String(s || "").trim());
-                }
-                function ipFromJson(j) {
-                  if (!j || typeof j !== "object") return "";
-                  const v = j.ip ?? j.IP ?? j.query;
-                  return v ? String(v).trim() : "";
-                }
-                async function firstIp() {
-                  // Prefer IPv4 when the network is dual-stack: api64 / many JSON APIs return IPv6 first.
-                  const v4Json = [
-                    // Often blocked in some regions (e.g. parts of China); try early when reachable.
-                    "https://api.ipify.org?format=json",
-                  ];
-                  const v4Text = [
-                    "https://checkip.amazonaws.com",
-                    "https://ipv4.icanhazip.com",
-                  ];
-                  for (const url of v4Json) {
-                    try {
-                      const r = await fetch(url, { cache: "no-store" });
-                      if (!r.ok) continue;
-                      const j = await r.json();
-                      const ip = ipFromJson(j);
-                      if (ip && isIPv4(ip)) return { ip };
-                    } catch (e) {}
+            # streamlit-javascript evaluates: `await eval(js_code)`. Top-level `await` is a SyntaxError
+            # inside eval; wrap in an async IIFE that returns the Promise result (see package README).
+            script = textwrap.dedent(
+                """
+                (async function () {
+                  function isIPv4(s) {
+                    return /^(\\d{1,3}\\.){3}\\d{1,3}$/.test(String(s || "").trim());
                   }
-                  for (const url of v4Text) {
-                    try {
-                      const r = await fetch(url, { cache: "no-store" });
-                      if (!r.ok) continue;
-                      const ip = (await r.text()).trim();
-                      if (ip && isIPv4(ip)) return { ip };
-                    } catch (e) {}
+                  function ipFromJson(j) {
+                    if (!j || typeof j !== "object") return "";
+                    const v = j.ip ?? j.IP ?? j.query;
+                    return v ? String(v).trim() : "";
                   }
-                  const endpoints = [
-                    "https://api64.ipify.org?format=json",
-                    "https://ifconfig.co/json",
-                    "https://ipwho.is/?output=json",
-                    "https://api.ipify.org?format=json",
-                  ];
-                  for (const url of endpoints) {
-                    try {
-                      const r = await fetch(url, { cache: "no-store" });
-                      if (!r.ok) continue;
-                      const j = await r.json();
-                      const ip = ipFromJson(j);
-                      if (ip) return { ip };
-                    } catch (e) {}
+                  async function firstIp() {
+                    const v4Json = ["https://api.ipify.org?format=json"];
+                    const v4Text = [
+                      "https://checkip.amazonaws.com",
+                      "https://ipv4.icanhazip.com",
+                    ];
+                    for (const url of v4Json) {
+                      try {
+                        const r = await fetch(url, { cache: "no-store" });
+                        if (!r.ok) continue;
+                        const j = await r.json();
+                        const ip = ipFromJson(j);
+                        if (ip && isIPv4(ip)) return { ip };
+                      } catch (e) {}
+                    }
+                    for (const url of v4Text) {
+                      try {
+                        const r = await fetch(url, { cache: "no-store" });
+                        if (!r.ok) continue;
+                        const ip = (await r.text()).trim();
+                        if (ip && isIPv4(ip)) return { ip };
+                      } catch (e) {}
+                    }
+                    const endpoints = [
+                      "https://api64.ipify.org?format=json",
+                      "https://ifconfig.co/json",
+                      "https://ipwho.is/?output=json",
+                      "https://api.ipify.org?format=json",
+                    ];
+                    for (const url of endpoints) {
+                      try {
+                        const r = await fetch(url, { cache: "no-store" });
+                        if (!r.ok) continue;
+                        const j = await r.json();
+                        const ip = ipFromJson(j);
+                        if (ip) return { ip };
+                      } catch (e) {}
+                    }
+                    return null;
                   }
-                  return null;
-                }
-                await firstIp();
-            """
-            res = st_javascript(script)
+                  return await firstIp();
+                })()
+                """
+            ).strip()
+            res = st_javascript(
+                script,
+                default=None,
+                key="quizzly_public_ip_v3_async_iife",
+            )
             if isinstance(res, dict) and res.get("ip"):
-                st.session_state["_quizzly_public_ip_js"] = str(res["ip"]).strip()
+                new_ip = str(res["ip"]).strip()
+                prev_ip = st.session_state.get("_quizzly_public_ip_js")
+                st.session_state["_quizzly_public_ip_js"] = new_ip
+                st.session_state.pop("_quizzly_public_ip_js_err", None)
+                if prev_ip != new_ip:
+                    st.session_state.pop("_quizzly_user_ip_id", None)
+            elif debug_enabled and isinstance(res, str) and res.strip():
+                st.session_state["_quizzly_public_ip_js_err"] = res.strip()[:500]
     except Exception:
         pass
+    if debug_enabled and st.session_state.get("_quizzly_public_ip_js_err"):
+        st.caption("Client IP (browser JS) debug: " + str(st.session_state["_quizzly_public_ip_js_err"]))
 
     # If Streamlit reset our session_state (WebSocket reconnect / idle), try to rehydrate
     # from cached/disk state using URL params.
