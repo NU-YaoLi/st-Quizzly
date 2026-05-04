@@ -229,6 +229,10 @@ _load_module(
     _root / "fntnd" / "views" / "quizzly_error_notebook_view.py",
 )
 _load_module(
+    "fntnd.views.quizzly_feedback_view",
+    _root / "fntnd" / "views" / "quizzly_feedback_view.py",
+)
+_load_module(
     "fntnd.views.quizzly_howtouse_view",
     _root / "fntnd" / "views" / "quizzly_howtouse_view.py",
 )

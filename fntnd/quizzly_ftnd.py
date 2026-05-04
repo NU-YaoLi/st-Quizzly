@@ -111,7 +111,7 @@ def _lazy_view_func(module_name: str, func_name: str):
         return None, f"{type(e).__name__}: {e!s}"
 
 # Sidebar “utility” views: hide materials UI; quiz state stays in session.
-_QUIZ_AUX_VIEWS = frozenset({"howto", "errors", "analytics"})
+_QUIZ_AUX_VIEWS = frozenset({"howto", "errors", "analytics", "feedback"})
 
 
 init_session_state()
@@ -208,15 +208,27 @@ def main():
                     sig=sig or sign_state(client_id, quiz_id),
                 )
                 st.rerun()
-            if st.button("📊 Data analysis", width="stretch"):
-                set_query_params(
-                    client=client_id,
-                    quiz=quiz_id,
-                    view="analytics",
-                    csig=csig or sign_client(client_id),
-                    sig=sig or sign_state(client_id, quiz_id),
-                )
-                st.rerun()
+            col_da, col_fb = st.columns(2, gap="small")
+            with col_da:
+                if st.button("📊 Data analysis", width="stretch"):
+                    set_query_params(
+                        client=client_id,
+                        quiz=quiz_id,
+                        view="analytics",
+                        csig=csig or sign_client(client_id),
+                        sig=sig or sign_state(client_id, quiz_id),
+                    )
+                    st.rerun()
+            with col_fb:
+                if st.button("💬 Feedback", width="stretch"):
+                    set_query_params(
+                        client=client_id,
+                        quiz=quiz_id,
+                        view="feedback",
+                        csig=csig or sign_client(client_id),
+                        sig=sig or sign_state(client_id, quiz_id),
+                    )
+                    st.rerun()
 
         # In non-quiz views, sidebar should ONLY show "Back to Quiz".
         if view in _QUIZ_AUX_VIEWS:
@@ -563,6 +575,16 @@ def main():
             fn()
         else:
             st.error("Could not load the Data Analysis view.")
+            if verr:
+                st.caption(verr)
+        return
+
+    if view == "feedback":
+        fn, verr = _lazy_view_func("fntnd.views.quizzly_feedback_view", "render_feedback_view")
+        if fn:
+            fn()
+        else:
+            st.error("Could not load the Feedback view.")
             if verr:
                 st.caption(verr)
         return
