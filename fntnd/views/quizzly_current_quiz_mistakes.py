@@ -1,3 +1,11 @@
+"""
+Right-rail "current quiz mistakes" panel.
+
+Shows each missed question for the in-progress quiz (live, before submission)
+and lets the user save those mistakes into the all-time error notebook via the
+``persist_cb`` callback supplied by ``fntnd.quizzly_ftnd``.
+"""
+
 import streamlit as st
 
 from fntnd.views._helpers import clean_option_text

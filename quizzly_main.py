@@ -1,3 +1,13 @@
+"""
+Streamlit entrypoint for Quizzly.
+
+Loads ``quizzly_config``, the ``bknd`` package, and the ``fntnd`` package
+explicitly via ``SourceFileLoader`` and registers them in ``sys.modules`` before
+invoking ``fntnd.quizzly_ftnd.main()``. The custom loader exists to side-step
+the Python 3.14 dotted-import ``KeyError`` (and its cascade of ``cannot import
+name X`` errors) that we hit on Streamlit Cloud cold starts.
+"""
+
 import importlib
 import importlib.util
 import sys

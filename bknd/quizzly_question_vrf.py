@@ -1,3 +1,20 @@
+"""
+Quiz validation + grading (code-based and LLM-based).
+
+- ``validate_quiz_shape``: hard-fail schema check used right after generation.
+- ``code_based_grading``: deterministic per-question scoring against the same
+  shape constraints (shared with ``validate_quiz_shape`` via
+  ``_question_constraint_error``).
+- ``run_quiz_output_guard`` / ``create_quiz_guard_chain``: structural guard
+  pass run before the questions are shown to the user.
+- ``llm_based_grading`` / ``verify_quiz``: LLM-based factual review layered
+  on top of the code-based score.
+- ``rebalance_correct_options_evenly``: distributes the correct answer across
+  A/B/C/D so the key isn't skewed.
+
+All LLM-using helpers return ``(result, usage)`` for cost aggregation.
+"""
+
 import json
 
 from langchain_core.messages import HumanMessage, SystemMessage

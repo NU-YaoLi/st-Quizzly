@@ -1,3 +1,12 @@
+"""
+"How to use Quizzly" help page.
+
+Static onboarding view that explains the upload / URL picker, generation
+limits, and grading flow. Pulls the live caps (``MIN_QUESTIONS``,
+``MAX_QUESTIONS_CAP``, ``DAILY_GENERATION_LIMIT``, ``MAX_WEB_URL_SLOTS``) from
+``quizzly_config`` so the user-facing copy stays in sync with the real limits.
+"""
+
 import streamlit as st
 
 from quizzly_config import (

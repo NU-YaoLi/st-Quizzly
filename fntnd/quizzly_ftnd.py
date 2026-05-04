@@ -1,3 +1,13 @@
+"""
+Top-level Streamlit UI for Quizzly.
+
+Defines ``main()`` (invoked by ``quizzly_main.py``) which renders the full
+flow: upload + URL picker, concept-extraction toggle, generation, quiz-taking,
+results, and the right-rail mistakes notebook. Coordinates session state,
+rate limiting, browser-IP hydration, persistent error notebook, and the
+admin analytics view.
+"""
+
 import hashlib
 import importlib
 import json

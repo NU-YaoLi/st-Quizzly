@@ -1,3 +1,17 @@
+"""
+Session state, disk persistence, and signed query-parameter helpers.
+
+- ``init_session_state``: defaults for every key the UI reads.
+- ``get_or_create_client_id`` + ``sign_client`` / ``sign_state``: HMAC-signed
+  ids that survive query-param round-trips.
+- ``load_state_from_disk`` / ``save_state_to_disk`` / ``persist_quiz_state``:
+  best-effort on-disk continuity for an in-progress quiz across reruns.
+- ``load_error_history`` / ``save_error_history``: all-time mistake notebook
+  persisted per ``client_id``.
+- ``get_query_params`` / ``set_query_params``: thin wrappers that smooth over
+  Streamlit API differences across versions.
+"""
+
 import hashlib
 import json
 import os

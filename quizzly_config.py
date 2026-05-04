@@ -1,3 +1,11 @@
+"""
+Central configuration constants for Quizzly.
+
+Single source of truth for caps (questions, web slots, file fingerprints), the
+LLM model id, Supabase URL, answer-letter ordering, and per-1K-token pricing
+used by the analytics dashboard. Imported by both backend and frontend modules.
+"""
+
 MIN_QUESTIONS = 3
 MAX_WEB_URL_SLOTS = 5
 

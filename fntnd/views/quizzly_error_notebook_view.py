@@ -1,3 +1,11 @@
+"""
+All-time error notebook page.
+
+Renders the full history of missed questions across every quiz this client
+session has taken (loaded via ``fntnd.quizzly_state.load_error_history``).
+Includes a clear-history action that writes the empty list back to disk.
+"""
+
 import streamlit as st
 
 from fntnd.quizzly_state import load_error_history, save_error_history

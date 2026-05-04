@@ -1,3 +1,15 @@
+"""
+Concept extraction + quiz generation (LangChain + OpenAI).
+
+- ``setup_api`` / ``get_page_count``: small PDF helpers.
+- ``create_extraction_chain``: pulls study concepts out of the source text.
+- ``create_generation_chain``: turns those concepts into multiple-choice
+  questions, optionally with a configurable scenario percentage.
+
+Both LLM chains return ``(result, usage)`` so token counts and estimated cost
+can be aggregated upstream by ``bknd.quizzly_rate_limit`` / the analytics view.
+"""
+
 import os
 
 import PyPDF2
