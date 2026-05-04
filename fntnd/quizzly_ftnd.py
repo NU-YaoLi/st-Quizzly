@@ -119,74 +119,37 @@ def main():
     debug_enabled = bool(st.secrets.get("DEBUG", False)) or (os.environ.get("DEBUG") == "1")
     view = (qp.get("view") or "").strip().lower()
 
-    # Hydrate a public client IP via browser JS (Streamlit Cloud often only exposes private hops server-side).
-    # This must run in the frontend render flow (not deep inside button-click handlers) to avoid "nothing happens"
-    # first-run behavior from custom components returning None before the next rerun.
+    # Hydrate public client IPv4 via browser → api.ipify.org (out-of-China workflow first; CN fallbacks later).
+    # Run in the main render path so streamlit-javascript can resolve before actions that read get_client_ip().
     try:
         from streamlit_javascript import st_javascript  # type: ignore
 
         if not st.session_state.get("_quizzly_public_ip_js"):
-            # Try multiple IP endpoints (some are blocked in certain regions).
-            script = """
-                function isIPv4(s) {
-                  return /^(\\d{1,3}\\.){3}\\d{1,3}$/.test(String(s || "").trim());
-                }
-                function ipFromJson(j) {
-                  if (!j || typeof j !== "object") return "";
-                  const v = j.ip ?? j.IP ?? j.query;
-                  return v ? String(v).trim() : "";
-                }
-                async function firstIp() {
-                  // Prefer IPv4 when the network is dual-stack: api64 / many JSON APIs return IPv6 first.
-                  const v4Json = [
-                    // Often blocked in some regions (e.g. parts of China); try early when reachable.
-                    "https://api.ipify.org?format=json",
-                  ];
-                  const v4Text = [
-                    "https://checkip.amazonaws.com",
-                    "https://ipv4.icanhazip.com",
-                  ];
-                  for (const url of v4Json) {
-                    try {
-                      const r = await fetch(url, { cache: "no-store" });
-                      if (!r.ok) continue;
-                      const j = await r.json();
-                      const ip = ipFromJson(j);
-                      if (ip && isIPv4(ip)) return { ip };
-                    } catch (e) {}
-                  }
-                  for (const url of v4Text) {
-                    try {
-                      const r = await fetch(url, { cache: "no-store" });
-                      if (!r.ok) continue;
-                      const ip = (await r.text()).trim();
-                      if (ip && isIPv4(ip)) return { ip };
-                    } catch (e) {}
-                  }
-                  const endpoints = [
-                    "https://api64.ipify.org?format=json",
-                    "https://ifconfig.co/json",
-                    "https://ipwho.is/?output=json",
-                    "https://api.ipify.org?format=json",
-                  ];
-                  for (const url of endpoints) {
-                    try {
-                      const r = await fetch(url, { cache: "no-store" });
-                      if (!r.ok) continue;
-                      const j = await r.json();
-                      const ip = ipFromJson(j);
-                      if (ip) return { ip };
-                    } catch (e) {}
-                  }
-                  return null;
-                }
-                await firstIp();
-            """
-            res = st_javascript(script)
+            # Public IPv4 via browser (works when server-side IP is a private hop, e.g. Streamlit Cloud).
+            # streamlit-javascript runs `await eval(js_code)` — use a Promise expression, not top-level
+            # `await fetch(...)` (that is invalid inside eval). China / other blocks: add fallbacks later.
+            script = (
+                'fetch("https://api.ipify.org?format=json", { cache: "no-store" })'
+                ".then(function (r) { if (!r.ok) throw new Error('ipify HTTP ' + r.status); return r.json(); })"
+            )
+            res = st_javascript(
+                script,
+                default=None,
+                key="quizzly_public_ip_ipify_json",
+            )
             if isinstance(res, dict) and res.get("ip"):
-                st.session_state["_quizzly_public_ip_js"] = str(res["ip"]).strip()
+                new_ip = str(res["ip"]).strip()
+                prev_ip = st.session_state.get("_quizzly_public_ip_js")
+                st.session_state["_quizzly_public_ip_js"] = new_ip
+                st.session_state.pop("_quizzly_public_ip_js_err", None)
+                if prev_ip != new_ip:
+                    st.session_state.pop("_quizzly_user_ip_id", None)
+            elif debug_enabled and isinstance(res, str) and res.strip():
+                st.session_state["_quizzly_public_ip_js_err"] = res.strip()[:500]
     except Exception:
         pass
+    if debug_enabled and st.session_state.get("_quizzly_public_ip_js_err"):
+        st.caption("Client IP (browser JS) debug: " + str(st.session_state["_quizzly_public_ip_js_err"]))
 
     # If Streamlit reset our session_state (WebSocket reconnect / idle), try to rehydrate
     # from cached/disk state using URL params.
