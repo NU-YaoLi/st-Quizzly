@@ -1,6 +1,6 @@
 import streamlit as st
 
-from fntnd.views import clean_option_text
+from fntnd.views._helpers import clean_option_text
 from quizzly_config import ANSWER_LETTERS
 
 

@@ -97,7 +97,13 @@ def _load_package(name: str, init_path: Path) -> None:
         raise ImportError(f"Could not load spec for package {name}")
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
-    loader.exec_module(mod)
+    try:
+        loader.exec_module(mod)
+    except Exception:
+        # Match _load_module: avoid leaving a half-initialized package in sys.modules,
+        # which would otherwise feed cascading "cannot import name X" errors on retry.
+        sys.modules.pop(name, None)
+        raise
 
 
 _load_module("quizzly_config", _root / "quizzly_config.py")
@@ -109,15 +115,29 @@ import streamlit as st
 st.set_page_config(page_title="Quizzly", page_icon="📖", layout="wide")
 
 # Load backend modules by path (avoid Python 3.14 Cloud dotted-import KeyError).
+# Order matters: dependents come after their dependencies.
 _load_module("bknd.quizzly_usage_log", _root / "bknd" / "quizzly_usage_log.py")
 _load_module("bknd.quizzly_user_ip", _root / "bknd" / "quizzly_user_ip.py")
 _load_module("bknd.quizzly_question_upldprcs", _root / "bknd" / "quizzly_question_upldprcs.py")
 _load_module("bknd.quizzly_rate_limit", _root / "bknd" / "quizzly_rate_limit.py")
+# Eager-load the rest of the bknd surface so the first request doesn't trip the
+# Python 3.14 dotted-import KeyError on a cold worker.
+_load_module("bknd.quizzly_question_gnrt", _root / "bknd" / "quizzly_question_gnrt.py")
+_load_module("bknd.quizzly_question_vrf", _root / "bknd" / "quizzly_question_vrf.py")
+_load_module("bknd.quizzly_analytics", _root / "bknd" / "quizzly_analytics.py")
 
 _load_package("fntnd", _root / "fntnd" / "__init__.py")
 
 # Explicitly load view modules to avoid Python 3.14 KeyError during normal import resolution.
 _load_package("fntnd.views", _root / "fntnd" / "views" / "__init__.py")
+# Helpers must load before the view submodules that depend on them. Keeping the
+# helper in its own module (instead of fntnd/views/__init__.py) prevents view
+# files from depending on their own package's init, which is the most common
+# place the cold-start race shows up.
+_load_module(
+    "fntnd.views._helpers",
+    _root / "fntnd" / "views" / "_helpers.py",
+)
 _load_module(
     "fntnd.views.quizzly_current_quiz_mistakes",
     _root / "fntnd" / "views" / "quizzly_current_quiz_mistakes.py",
