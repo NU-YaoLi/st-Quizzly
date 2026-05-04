@@ -582,7 +582,7 @@ def main():
     if view == "feedback":
         fn, verr = _lazy_view_func("fntnd.views.quizzly_feedback_view", "render_feedback_view")
         if fn:
-            fn()
+            fn(client_id=client_id, quiz_id=quiz_id)
         else:
             st.error("Could not load the Feedback view.")
             if verr:

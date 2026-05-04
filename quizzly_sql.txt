@@ -4,16 +4,19 @@
 -- ---------------------------------------------------------------------------
 -- Client identity (one row per distinct IP seen)
 -- ---------------------------------------------------------------------------
-create table if not exists public.user_ip (
-  id uuid primary key default gen_random_uuid(),
-  ip text not null unique,
-  country text,
-  region text,
-  city text,
-  created_at timestamptz not null default now()
-);
+create table public.user_ip (
+  id uuid not null default gen_random_uuid (),
+  ip text not null,
+  country text null,
+  region text null,
+  city text null,
+  created_at timestamp with time zone not null default now(),
+  constraint user_ip_pkey primary key (id),
+  constraint user_ip_ip_key unique (ip)
+) TABLESPACE pg_default;
 
-create index if not exists user_ip_ip_idx on public.user_ip (ip);
+create index IF not exists user_ip_ip_idx on public.user_ip using btree (ip) TABLESPACE pg_default;
+
 create index if not exists user_ip_created_at_idx on public.user_ip (created_at desc);
 
 comment on column public.user_ip.region is 'State / province (geo provider dependent)';
@@ -21,31 +24,33 @@ comment on column public.user_ip.region is 'State / province (geo provider depen
 -- ---------------------------------------------------------------------------
 -- One row per successful quiz generation
 -- ---------------------------------------------------------------------------
-create table if not exists public.quiz_generation_usage (
-  id uuid primary key default gen_random_uuid(),
-  user_ip_id uuid references public.user_ip (id) on delete set null,
-  created_at timestamptz not null default now(),
-  estimated_cost_usd numeric(14, 6),
-  num_questions integer,
-  generation_mode text,
-  material_source text,
-  material_quantity integer,
-  upload_total_bytes bigint,
-  web_text_chars bigint,
-  ext_input_tokens bigint,
-  ext_cached_input_tokens bigint,
-  ext_output_tokens bigint,
-  gen_input_tokens bigint,
-  gen_cached_input_tokens bigint,
-  gen_output_tokens bigint,
-  vrf_input_tokens bigint,
-  vrf_cached_input_tokens bigint,
-  vrf_output_tokens bigint,
-  generation_duration_sec numeric(12, 3),
-  country text,
-  region text,
-  city text
-);
+create table public.quiz_generation_usage (
+  id uuid not null default gen_random_uuid (),
+  user_ip_id uuid null,
+  created_at timestamp with time zone not null default now(),
+  estimated_cost_usd numeric(14, 6) null,
+  num_questions integer null,
+  generation_mode text null,
+  material_source text null,
+  material_quantity integer null,
+  upload_total_bytes bigint null,
+  web_text_chars bigint null,
+  ext_input_tokens bigint null,
+  ext_cached_input_tokens bigint null,
+  ext_output_tokens bigint null,
+  gen_input_tokens bigint null,
+  gen_cached_input_tokens bigint null,
+  gen_output_tokens bigint null,
+  vrf_input_tokens bigint null,
+  vrf_cached_input_tokens bigint null,
+  vrf_output_tokens bigint null,
+  generation_duration_sec numeric(12, 3) null,
+  country text null,
+  region text null,
+  city text null,
+  constraint quiz_generation_usage_pkey primary key (id),
+  constraint quiz_generation_usage_user_ip_id_fkey foreign KEY (user_ip_id) references user_ip (id) on delete set null
+) TABLESPACE pg_default;
 
 create index if not exists quiz_generation_usage_user_ip_id_created_at_idx
   on public.quiz_generation_usage (user_ip_id, created_at desc);
@@ -85,3 +90,56 @@ as $$
   group by 1
   order by 1;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- Visitor feedback (joins to user_ip on ip — same canonical string as user_ip.ip)
+-- ---------------------------------------------------------------------------
+create table public.user_feedback (
+  id uuid not null default gen_random_uuid (),
+  created_at timestamp with time zone not null default now(),
+  ip text not null,
+  category text null,
+  subject text null,
+  body text not null,
+  quiz_id text null,
+  client_id text null,
+  user_agent text null,
+  constraint user_feedback_pkey primary key (id),
+  constraint user_feedback_ip_fkey foreign KEY (ip) references user_ip (ip) on delete restrict,
+  constraint user_feedback_body_len check (
+    char_length(body) >= 1
+    and char_length(body) <= 8000
+  ),
+  constraint user_feedback_subject_len check (
+    subject is null
+    or char_length(subject) <= 240
+  ),
+  constraint user_feedback_category_len check (
+    category is null
+    or char_length(category) <= 64
+  ),
+  constraint user_feedback_quiz_id_len check (
+    quiz_id is null
+    or char_length(quiz_id) <= 128
+  ),
+  constraint user_feedback_client_id_len check (
+    client_id is null
+    or char_length(client_id) <= 128
+  ),
+  constraint user_feedback_user_agent_len check (
+    user_agent is null
+    or char_length(user_agent) <= 512
+  )
+) TABLESPACE pg_default;
+
+create index if not exists user_feedback_ip_created_at_idx on public.user_feedback using btree (ip, created_at desc) TABLESPACE pg_default;
+
+create index if not exists user_feedback_created_at_idx on public.user_feedback using btree (created_at desc) TABLESPACE pg_default;
+
+comment on table public.user_feedback is 'User-submitted feedback; join to user_ip on ip (unique) or aggregate by ip / day.';
+
+comment on column public.user_feedback.ip is 'Canonical IP string; FK to user_ip.ip for fast visitor-scoped joins.';
+
+comment on column public.user_feedback.quiz_id is 'Optional opaque quiz id from the app URL (not a DB FK).';
+
+comment on column public.user_feedback.client_id is 'Optional opaque client id from the app URL for support correlation.';

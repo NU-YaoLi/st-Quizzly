@@ -193,6 +193,7 @@ _reinforce_quizzly_config()
 _load_module("bknd.quizzly_question_upldprcs", _root / "bknd" / "quizzly_question_upldprcs.py")
 _reinforce_quizzly_config()
 _load_module("bknd.quizzly_rate_limit", _root / "bknd" / "quizzly_rate_limit.py")
+_load_module("bknd.quizzly_feedback_log", _root / "bknd" / "quizzly_feedback_log.py")
 # Shared text helpers used by lightweight views.
 _load_module("bknd.quizzly_text", _root / "bknd" / "quizzly_text.py")
 # Eager-load the rest of the bknd surface so the first request doesn't trip the
