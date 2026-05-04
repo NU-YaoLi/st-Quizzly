@@ -124,7 +124,7 @@ def main():
     # `await eval(js_code)`, so top-level `await` is invalid; an IIFE returns a Promise that
     # `await` can unwrap). Multi-endpoint with IPv4 preference so a single blocked endpoint
     # (e.g. ipify in some regions) does not leave us with an empty IP.
-    _IP_WARMUP_MAX_ATTEMPTS = 3
+    _IP_WARMUP_MAX_ATTEMPTS = 8
     _ip_should_rerun = False
     try:
         from streamlit_javascript import st_javascript  # type: ignore
@@ -218,10 +218,17 @@ def main():
         )[:500]
     # Trigger the rerun OUTSIDE the try so st.rerun()'s RerunException isn't swallowed.
     if _ip_should_rerun:
-        time.sleep(0.4)
+        time.sleep(0.5)
         st.rerun()
     if debug_enabled and st.session_state.get("_quizzly_public_ip_js_err"):
         st.caption("Client IP (browser JS) debug: " + str(st.session_state["_quizzly_public_ip_js_err"]))
+    if debug_enabled:
+        # Surface the *current* state so we can tell unknown-because-blocked from unknown-because-pending.
+        _dbg_ip = st.session_state.get("_quizzly_public_ip_js") or "(not set)"
+        _dbg_attempts = st.session_state.get("_quizzly_ip_warmup_attempts", 0)
+        st.caption(
+            f"Client IP debug — js_cache={_dbg_ip}, warmup_attempts={_dbg_attempts}/{_IP_WARMUP_MAX_ATTEMPTS}"
+        )
 
     # If Streamlit reset our session_state (WebSocket reconnect / idle), try to rehydrate
     # from cached/disk state using URL params.
@@ -686,7 +693,34 @@ def main():
         # Dedicated slot so workflow progress is always visible in the same place.
         workflow_slot = st.container()
 
-        if generate_btn:
+        # Final safety net: do NOT start a multi-second generation while the public IP is
+        # still hydrating. Without this, a fast click after page load can record a row with
+        # ip="unknown" (and country/region/city = NULL) even though the JS would have
+        # resolved a few hundred ms later. We persist the click intent across short reruns
+        # via `_quizzly_pending_generate` (Streamlit's `button` only returns True on the
+        # click-rerun itself).
+        from bknd.quizzly_rate_limit import get_client_ip as _ip_for_guard
+
+        _generate_requested = bool(generate_btn) or bool(
+            st.session_state.get("_quizzly_pending_generate")
+        )
+
+        if _generate_requested and _ip_for_guard() == "unknown":
+            _click_retries = int(st.session_state.get("_quizzly_ip_click_retries", 0))
+            if _click_retries < 4:
+                st.session_state["_quizzly_ip_click_retries"] = _click_retries + 1
+                st.session_state["_quizzly_pending_generate"] = True
+                with workflow_slot:
+                    st.info("Detecting your network info… retrying in a moment.")
+                time.sleep(0.6)
+                st.rerun()
+            # Retries exhausted: proceed with "unknown" rather than blocking the user.
+            st.session_state.pop("_quizzly_ip_click_retries", None)
+
+        if _generate_requested:
+            st.session_state.pop("_quizzly_pending_generate", None)
+            st.session_state.pop("_quizzly_ip_click_retries", None)
+
             _rl = check_daily_generation_allowed()
             if not _rl.allowed:
                 st.error(_rl.message)
