@@ -2,7 +2,8 @@
 Admin-style usage dashboard: users, per-quiz detail, and cost (UTC).
 """
 
-from __future__ import annotations
+# NOTE: deliberately no ``from __future__ import annotations`` — see
+# ``bknd/quizzly_usage_log.py`` for the Python 3.14 rationale.
 
 from collections import defaultdict
 from datetime import date, datetime, timezone

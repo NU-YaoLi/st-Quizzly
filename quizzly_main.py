@@ -15,24 +15,28 @@ if sys.path[0] != _root_str:
     sys.path.insert(0, _root_str)
 
 
-def _load_top_level_module(name: str, file_path: Path) -> None:
-    """Load a single-file module by path (avoids Python 3.14 import KeyError on Streamlit Cloud).
+def _load_module(name: str, file_path: Path) -> None:
+    """Load a ``.py`` file by path and register it in ``sys.modules`` as ``name``.
 
-    Uses ``SourceFileLoader`` instead of ``spec_from_file_location`` so execution matches the
-    normal import path and all module-level names (e.g. ``DAILY_GENERATION_LIMIT``) are bound.
+    Works for both top-level modules (e.g. ``quizzly_config``) and dotted
+    submodules (e.g. ``bknd.quizzly_rate_limit``). Uses ``SourceFileLoader`` so
+    execution matches the normal import path — module-level names are bound
+    correctly. Avoids the Python 3.14 ``KeyError`` we hit on Streamlit Cloud
+    when relying on dotted-import machinery.
     """
     path_str = str(file_path.resolve())
     if not file_path.is_file():
-        raise ImportError(f"Required file missing: {path_str}")
+        raise ImportError(f"Required module missing: {path_str}")
     loader = SourceFileLoader(name, path_str)
     spec = importlib.util.spec_from_file_location(name, path_str, loader=loader)
     if spec is None:
-        raise ImportError(f"Could not create spec for {name} from {path_str}")
+        raise ImportError(f"Could not create spec for module {name} from {path_str}")
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
     try:
         loader.exec_module(mod)
     except Exception:
+        # Avoid leaving a half-initialized module that breaks subsequent imports.
         sys.modules.pop(name, None)
         raise
 
@@ -42,7 +46,7 @@ def _verify_quizzly_config() -> None:
     if mod is None:
         # Streamlit Cloud + Python 3.14 can occasionally drop sys.modules entries mid-reload.
         # Reload from disk once rather than crashing.
-        _load_top_level_module("quizzly_config", _root / "quizzly_config.py")
+        _load_module("quizzly_config", _root / "quizzly_config.py")
         mod = sys.modules.get("quizzly_config")
     if mod is None:
         raise ImportError("quizzly_config was not registered in sys.modules.")
@@ -96,26 +100,7 @@ def _load_package(name: str, init_path: Path) -> None:
     loader.exec_module(mod)
 
 
-def _load_module(name: str, file_path: Path) -> None:
-    """Load a .py file as module ``name`` (supports dotted names)."""
-    path_str = str(file_path.resolve())
-    if not file_path.is_file():
-        raise ImportError(f"Required module missing: {path_str}")
-    loader = SourceFileLoader(name, path_str)
-    spec = importlib.util.spec_from_file_location(name, path_str, loader=loader)
-    if spec is None:
-        raise ImportError(f"Could not create spec for module {name} from {path_str}")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    try:
-        loader.exec_module(mod)
-    except Exception:
-        # Avoid leaving a half-initialized module that breaks subsequent imports.
-        sys.modules.pop(name, None)
-        raise
-
-
-_load_top_level_module("quizzly_config", _root / "quizzly_config.py")
+_load_module("quizzly_config", _root / "quizzly_config.py")
 _verify_quizzly_config()
 _load_package("bknd", _root / "bknd" / "__init__.py")
 

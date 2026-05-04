@@ -1,4 +1,5 @@
 import hashlib
+import importlib
 import json
 import mimetypes
 import os
@@ -76,7 +77,7 @@ from fntnd.quizzly_state import (
     get_query_params,
     init_session_state,
     load_error_history,
-    load_state_cached,
+    load_state_from_disk,
     persist_quiz_state,
     save_error_history,
     set_query_params,
@@ -85,11 +86,10 @@ from fntnd.quizzly_state import (
     sign_state,
 )
 
-# Streamlit Community Cloud + Python 3.14 can intermittently fail dotted imports during reload.
-# Avoid importing view modules at import-time; resolve them lazily when needed.
-import importlib
 
-
+# View modules are resolved via ``importlib`` here (not direct imports) because
+# Streamlit Community Cloud + Python 3.14 can intermittently fail dotted imports
+# during reload — lazy resolution lets us recover instead of crashing on boot.
 def _lazy_view_func(module_name: str, func_name: str):
     try:
         mod = importlib.import_module(module_name)
@@ -130,9 +130,9 @@ def main():
         render_ip_debug_caption()
 
     # If Streamlit reset our session_state (WebSocket reconnect / idle), try to rehydrate
-    # from cached/disk state using URL params.
+    # from disk state using URL params.
     if quiz_id and st.session_state.get("quiz_data") is None:
-        hydrated = load_state_cached(client_id, quiz_id, sig=sig)
+        hydrated = load_state_from_disk(client_id, quiz_id, sig=sig)
         if hydrated:
             st.session_state["quiz_data"] = hydrated.get("quiz_data")
             st.session_state["verification_report"] = hydrated.get("verification_report")
@@ -508,7 +508,7 @@ def main():
                 index=0,
                 help=(
                     "Full: concept extraction + quiz generation + LLM grading verification.\n\n"
-                    "Fast: skip extraction and extraction, slightly compromises quiz quality)."
+                    "Fast: skip concept extraction and verification (slightly compromises quiz quality)."
                 ),
             )
             fast_mode = generation_mode == "Fast"
@@ -623,7 +623,6 @@ def main():
 
             st.session_state["workflow_status_label"] = None
             st.session_state["workflow_status_lines"] = []
-            st.session_state["workflow_running"] = True
             quiz_id = uuid.uuid4().hex
             set_query_params(
                 client=client_id,
@@ -676,7 +675,7 @@ def main():
                     st.session_state["workflow_token_usage_extraction"] = {}
                 else:
                     log_line("Extracting core concepts...")
-                    extractor = create_extraction_chain(return_usage=True)
+                    extractor = create_extraction_chain()
                     concepts_resp, ext_usage = extractor(
                         {
                             "file_ids": oai_file_ids,
@@ -691,9 +690,7 @@ def main():
                         )
 
                 log_line(f"Generating {num_questions} questions...")
-                generator = create_generation_chain(
-                    num_questions, scenario_pct=scenario_pct, return_usage=True
-                )
+                generator = create_generation_chain(num_questions, scenario_pct=scenario_pct)
                 quiz_data, gen_usage = generator(
                     {
                         "file_ids": oai_file_ids,
@@ -725,7 +722,7 @@ def main():
                     st.session_state["workflow_token_usage_verification"] = {}
                 else:
                     log_line("Running quiz verification checks...")
-                    report, vrf_usage = verify_quiz(concepts, quiz_data, num_questions, return_usage=True)
+                    report, vrf_usage = verify_quiz(concepts, quiz_data, num_questions)
                     st.session_state["workflow_token_usage_verification"] = vrf_usage
 
                 st.session_state["verification_report"] = report
@@ -750,7 +747,6 @@ def main():
                 )
 
                 elapsed_time = time.time() - start_time
-                st.session_state["generation_time"] = elapsed_time
                 st.session_state["workflow_status_label"] = f"Workflow complete in {elapsed_time:.1f} secs"
                 ext_tokens = st.session_state.get("workflow_token_usage_extraction") or {}
                 gen_tokens = st.session_state.get("workflow_token_usage_generation") or {}
@@ -910,7 +906,6 @@ def main():
                     )
                 except Exception:
                     pass
-                st.session_state["workflow_running"] = False
                 st.rerun()
 
             except OpenAIError as e:
@@ -945,7 +940,6 @@ def main():
                 except Exception:
                     pass
             finally:
-                st.session_state["workflow_running"] = False
                 cleanup_list = st.session_state.get("cleanup_paths") or []
                 for p in cleanup_list:
                     try:

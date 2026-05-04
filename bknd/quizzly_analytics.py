@@ -4,7 +4,10 @@ Aggregate usage / estimated cost from Supabase (`quiz_generation_usage`).
 Prefers RPC `quizzly_usage_by_day` when installed; otherwise loads rows and aggregates in Python.
 """
 
-from __future__ import annotations
+# NOTE: deliberately no ``from __future__ import annotations`` — combining it
+# with ``@dataclass`` can break module resolution on Python 3.14 (see also
+# ``bknd/quizzly_usage_log.py``). All annotations here are PEP 585 / PEP 604
+# generics that resolve at runtime without the future import.
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass

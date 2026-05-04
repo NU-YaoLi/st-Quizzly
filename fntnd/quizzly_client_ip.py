@@ -22,7 +22,8 @@ Design notes:
   pre-generation guard in ``quizzly_ftnd.main()``.
 """
 
-from __future__ import annotations
+# NOTE: deliberately no ``from __future__ import annotations`` — see
+# ``bknd/quizzly_usage_log.py`` for the Python 3.14 rationale.
 
 import streamlit as st
 

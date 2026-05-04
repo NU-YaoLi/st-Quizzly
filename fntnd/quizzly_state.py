@@ -17,15 +17,16 @@ def sha256_text(s: str) -> str:
 
 
 def _signing_secret() -> str | None:
-    # Prefer a dedicated secret; fall back to OPENAI_API_KEY since it's already required.
+    """Read the dedicated HMAC secret used for client/quiz URL signatures.
+
+    We deliberately do NOT fall back to ``OPENAI_API_KEY`` — rotating that key
+    would silently invalidate every previously-signed quiz URL. Set
+    ``STATE_SIGNING_SECRET`` in Streamlit secrets (or env) to enable signing.
+    When unset, ``sign_state``/``sign_client`` return ``""`` and verification
+    becomes a no-op.
+    """
     try:
         s = (st.secrets.get("STATE_SIGNING_SECRET") or "").strip()
-        if s:
-            return s
-    except Exception:
-        pass
-    try:
-        s = (st.secrets.get("OPENAI_API_KEY") or "").strip()
         if s:
             return s
     except Exception:
@@ -160,10 +161,6 @@ def save_state_to_disk(client_id: str, quiz_id: str, payload: dict) -> None:
         pass
 
 
-def load_state_cached(client_id: str, quiz_id: str, *, sig: str | None = None) -> dict | None:
-    return load_state_from_disk(client_id, quiz_id, sig=sig)
-
-
 def persist_quiz_state(
     client_id: str,
     quiz_id: str,
@@ -189,10 +186,6 @@ def persist_quiz_state(
         "workflow_status_lines": workflow_status_lines,
     }
     save_state_to_disk(client_id, quiz_id, payload)
-    try:
-        load_state_cached.clear()  # type: ignore[attr-defined]
-    except Exception:
-        pass
 
 
 def init_session_state() -> None:
@@ -208,11 +201,9 @@ def init_session_state() -> None:
 
     st.session_state.setdefault("quiz_data", None)
     st.session_state.setdefault("verification_report", None)
-    st.session_state.setdefault("generation_time", None)
     st.session_state.setdefault("current_paths", [])
     st.session_state.setdefault("cleanup_paths", [])
     st.session_state.setdefault("workflow_status_label", None)
     st.session_state.setdefault("workflow_status_lines", [])
-    st.session_state.setdefault("workflow_running", False)
     st.session_state.setdefault("web_url_slot_count", 1)
 

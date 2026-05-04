@@ -1,20 +1,7 @@
 import streamlit as st
 
+from fntnd.views import clean_option_text
 from quizzly_config import ANSWER_LETTERS
-
-
-def _clean_option_text(s: str) -> str:
-    # Many model outputs already include "A) ..." inside the option string.
-    # For display, strip any repeated leading letter prefixes like "A) A) ".
-    if not isinstance(s, str):
-        return ""
-    t = s.strip()
-    for _ in range(3):
-        if len(t) >= 3 and t[0].upper() in "ABCD" and t[1] == ")" and t[2] == " ":
-            t = t[3:].lstrip()
-        else:
-            break
-    return t
 
 
 def render_current_quiz_mistakes(*, client_id: str, quiz_id: str, persist_cb) -> None:
@@ -48,7 +35,7 @@ def render_current_quiz_mistakes(*, client_id: str, quiz_id: str, persist_cb) ->
                 if options:
                     for i, opt in enumerate(options):
                         letter = ANSWER_LETTERS[i] if i < len(ANSWER_LETTERS) else str(i)
-                        st.markdown(f"**{letter})** {_clean_option_text(opt)}")
+                        st.markdown(f"**{letter})** {clean_option_text(opt)}")
 
                 user_letter = error.get("user_answer_letter")
                 correct_letter = error.get("correct_option")

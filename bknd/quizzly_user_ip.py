@@ -5,7 +5,9 @@ Uses ip-api.com (HTTP, free) first, then ipwho.is (HTTPS, free) if the first cal
 Some deployment environments block plain HTTP; HTTPS fallback fixes missing geo.
 """
 
-from __future__ import annotations
+# NOTE: deliberately no ``from __future__ import annotations`` — keeping
+# annotations as runtime objects matches the rest of the codebase and avoids
+# the dataclass + lazy-annotation interaction that misbehaves on Python 3.14.
 
 from typing import Any
 from urllib.parse import quote

@@ -111,7 +111,7 @@ def _check_http_url_safety(url: str) -> tuple[bool, str]:
     return True, "ok"
 
 
-def extract_readable_text(html: str) -> str:
+def _extract_readable_text(html: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
 
     for tag in soup(["script", "style", "noscript", "header", "footer", "nav", "aside"]):
@@ -195,7 +195,7 @@ def fetch_website_text(url: str) -> tuple[bool, str, str]:
         except Exception:
             html = raw.decode("utf-8", errors="ignore")
 
-        text = extract_readable_text(html)
+        text = _extract_readable_text(html)
         break
     else:
         return False, "", "request_failed"

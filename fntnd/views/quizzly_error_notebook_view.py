@@ -1,19 +1,8 @@
 import streamlit as st
 
 from fntnd.quizzly_state import load_error_history, save_error_history
+from fntnd.views import clean_option_text
 from quizzly_config import ANSWER_LETTERS
-
-
-def _clean_option_text(s: str) -> str:
-    if not isinstance(s, str):
-        return ""
-    t = s.strip()
-    for _ in range(3):
-        if len(t) >= 3 and t[0].upper() in "ABCD" and t[1] == ")" and t[2] == " ":
-            t = t[3:].lstrip()
-        else:
-            break
-    return t
 
 
 def render_error_notebook_view(*, client_id: str, quiz_id: str) -> None:
@@ -47,7 +36,7 @@ def render_error_notebook_view(*, client_id: str, quiz_id: str) -> None:
             if options:
                 for i, opt in enumerate(options):
                     letter = ANSWER_LETTERS[i] if i < len(ANSWER_LETTERS) else str(i)
-                    st.markdown(f"**{letter})** {_clean_option_text(opt)}")
+                    st.markdown(f"**{letter})** {clean_option_text(opt)}")
 
             user_letter = error.get("user_answer_letter")
             correct_letter = error.get("correct_option")

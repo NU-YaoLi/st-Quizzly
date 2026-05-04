@@ -1,0 +1,21 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Streamlit local secrets (NEVER commit real keys)
+.streamlit/secrets.toml
+
+# Local quiz state cache (Streamlit tempdir copy can also be regenerated)
+quizzly_state/

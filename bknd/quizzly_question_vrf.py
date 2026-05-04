@@ -6,6 +6,30 @@ from langchain_openai import ChatOpenAI
 
 from quizzly_config import ANSWER_LETTERS, QUIZZLY_MODEL
 
+# Single source of truth for the per-question schema. Used by both the strict
+# ``validate_quiz_shape`` (raises) and the soft ``code_based_grading`` (scores).
+_REQUIRED_QUESTION_KEYS = frozenset(
+    {"id", "difficulty", "question_text", "options", "correct_option", "explanation"}
+)
+
+
+def _question_constraint_error(q, idx_label: str) -> str | None:
+    """Return a single failure message for ``q`` (or ``None`` if it passes).
+
+    Checks: object type, required keys, options length, correct_option letter.
+    """
+    if not isinstance(q, dict):
+        return f"Question {idx_label} is not an object."
+    missing = _REQUIRED_QUESTION_KEYS - set(q.keys())
+    if missing:
+        return f"Question {q.get('id', idx_label)} missing keys: {sorted(missing)}"
+    opts = q.get("options")
+    if not isinstance(opts, list) or len(opts) != 4:
+        return f"Question {q.get('id', idx_label)} must have exactly 4 options."
+    if q.get("correct_option") not in ANSWER_LETTERS:
+        return f"Question {q.get('id', idx_label)} has invalid correct_option."
+    return None
+
 
 def _strip_option_prefix(opt: str) -> str:
     s = str(opt or "").strip()
@@ -85,7 +109,7 @@ def rebalance_correct_options_evenly(quiz: dict) -> dict:
 
 
 def validate_quiz_shape(quiz, expected_count: int) -> dict:
-    """Basic schema guard for generated quiz JSON."""
+    """Strict schema guard for generated quiz JSON; raises ``ValueError`` on first failure."""
     if not isinstance(quiz, dict):
         raise ValueError("Generated quiz is not a JSON object.")
 
@@ -96,21 +120,10 @@ def validate_quiz_shape(quiz, expected_count: int) -> dict:
     if len(questions) != expected_count:
         raise ValueError(f"Expected {expected_count} questions, got {len(questions)}.")
 
-    required = {"id", "difficulty", "question_text", "options", "correct_option", "explanation"}
-    for q in questions:
-        if not isinstance(q, dict):
-            raise ValueError("A question item is not an object.")
-
-        missing = required - set(q.keys())
-        if missing:
-            raise ValueError(f"Question {q.get('id', '?')} missing keys: {sorted(missing)}")
-
-        opts = q.get("options")
-        if not isinstance(opts, list) or len(opts) != 4:
-            raise ValueError(f"Question {q.get('id', '?')} must have exactly 4 options.")
-
-        if q.get("correct_option") not in ANSWER_LETTERS:
-            raise ValueError(f"Question {q.get('id', '?')} has invalid correct_option.")
+    for i, q in enumerate(questions):
+        err = _question_constraint_error(q, idx_label=f"#{i + 1}")
+        if err:
+            raise ValueError(err)
 
     return quiz
 
@@ -154,76 +167,73 @@ def run_quiz_output_guard(quiz_data: dict) -> dict:
 
 
 def code_based_grading(quiz_data, expected_count):
+    """Soft constraint check used by the verification report.
+
+    Returns ``(normalized_score_0_to_1, feedback_list)``. Shares per-question
+    rules with ``validate_quiz_shape`` via ``_question_constraint_error``.
     """
-    Verifies strict constraints (Code-Based Grading).
-    Checks JSON schema, question count, required keys, and option formatting.
-    """
-    score = 0
-    max_score = 4.0  # Increased max score for more granular testing
-    feedback = []
+    feedback: list[str] = []
 
-    # 1. Check valid JSON dictionary
-    if isinstance(quiz_data, dict) and "questions" in quiz_data:
-        score += 1.0
-        feedback.append("Pass: Valid JSON root schema detected.")
-    else:
-        feedback.append("Fail: Invalid JSON structure. Missing 'questions' key.")
-        return score, feedback  # Fatal error, stop checking
+    # 1. Root JSON shape (fatal — return early if missing).
+    if not (isinstance(quiz_data, dict) and isinstance(quiz_data.get("questions"), list)):
+        feedback.append("Fail: Invalid JSON structure. Missing 'questions' list.")
+        return 0.0, feedback
 
-    questions = quiz_data.get("questions", [])
+    score = 1.0
+    feedback.append("Pass: Valid JSON root schema detected.")
+    questions = quiz_data["questions"]
 
-    # 2. Check Question Count
-    num_questions = len(questions)
-    if num_questions == expected_count:
+    # 2. Question count.
+    if len(questions) == expected_count:
         score += 1.0
         feedback.append(f"Pass: Generated exactly {expected_count} questions.")
     else:
-        feedback.append(f"Fail: Expected {expected_count} questions, got {num_questions}.")
+        feedback.append(f"Fail: Expected {expected_count} questions, got {len(questions)}.")
 
-    # 3. Check Required Keys per Question
-    required_keys = {"id", "difficulty", "question_text", "options", "correct_option", "explanation"}
-    keys_passed = True
-    for q in questions:
-        if not required_keys.issubset(q.keys()):
-            keys_passed = False
-            missing = required_keys - q.keys()
-            feedback.append(f"Fail: Question {q.get('id', 'Unknown')} missing keys: {missing}")
-            break
-
-    if keys_passed:
+    # 3. Required per-question keys (first failing question only).
+    keys_err = next(
+        (
+            f"Fail: Question {q.get('id', 'Unknown')} missing keys: "
+            f"{sorted(_REQUIRED_QUESTION_KEYS - set(q.keys()))}"
+            for q in questions
+            if isinstance(q, dict) and (_REQUIRED_QUESTION_KEYS - set(q.keys()))
+        ),
+        None,
+    )
+    if keys_err is None:
         score += 1.0
         feedback.append("Pass: All questions contain required pedagogical keys.")
+    else:
+        feedback.append(keys_err)
 
-    # 4. Check Option Formatting (Must have 4 options, Correct option must be A, B, C, or D)
-    options_passed = True
-    valid_answers = ["A", "B", "C", "D"]
+    # 4. Options length + correct_option letter (first failure only).
+    options_err: str | None = None
     for q in questions:
-        if len(q.get("options", [])) != 4:
-            options_passed = False
-            feedback.append(f"Fail: Question {q.get('id')} does not have exactly 4 options.")
+        if not isinstance(q, dict) or (_REQUIRED_QUESTION_KEYS - set(q.keys())):
+            # Already counted under "keys" — don't double-fail this category.
+            continue
+        if not isinstance(q.get("options"), list) or len(q.get("options", [])) != 4:
+            options_err = f"Fail: Question {q.get('id')} does not have exactly 4 options."
             break
-
-        correct_opt = q.get("correct_option", "")
-        # Check if the correct option is just the letter (e.g., "A", not "A) The answer")
-        if correct_opt not in valid_answers:
-            options_passed = False
-            feedback.append(
-                f"Fail: Question {q.get('id')} has invalid correct_option format: '{correct_opt}'"
+        if q.get("correct_option") not in ANSWER_LETTERS:
+            options_err = (
+                f"Fail: Question {q.get('id')} has invalid correct_option format: "
+                f"'{q.get('correct_option')}'"
             )
             break
-
-    if options_passed:
+    if options_err is None:
         score += 1.0
         feedback.append("Pass: All questions have 4 options and valid answer keys.")
+    else:
+        feedback.append(options_err)
 
-    # Normalize score to a 0.0 - 1.0 scale
-    final_normalized_score = score / max_score
-    return final_normalized_score, feedback
+    return score / 4.0, feedback
 
 
-def llm_based_grading(concepts, quiz_data, *, return_usage: bool = False):
-    """
-    Evaluates Task Fidelity and Pedagogical Quality using an LLM-as-a-judge.
+def llm_based_grading(concepts, quiz_data) -> tuple[dict, dict]:
+    """LLM-as-a-judge for Task Fidelity / Pedagogical Quality.
+
+    Returns ``(eval_dict, token_usage_dict)``.
     """
     llm = ChatOpenAI(
         model=QUIZZLY_MODEL,
@@ -244,14 +254,9 @@ Output a JSON object strictly with the keys:
 """
 
     human_content = f"CONCEPTS:\n{concepts}\n\nQUIZ:\n{json.dumps(quiz_data)}"
-
     messages = [SystemMessage(content=eval_prompt), HumanMessage(content=human_content)]
 
     parser = JsonOutputParser()
-    if not return_usage:
-        chain = llm | parser
-        return chain.invoke(messages)
-
     msg = llm.invoke(messages)
     usage = {}
     try:
@@ -265,16 +270,10 @@ Output a JSON object strictly with the keys:
     return parser.parse(msg.content), usage
 
 
-def verify_quiz(concepts, quiz_data, expected_count, *, return_usage: bool = False):
-    """
-    Runs all verifications and returns a comprehensive report dictionary.
-    """
+def verify_quiz(concepts, quiz_data, expected_count) -> tuple[dict, dict]:
+    """Run all verifications and return ``(report_dict, token_usage_dict)``."""
     code_score, code_feedback = code_based_grading(quiz_data, expected_count)
-    if return_usage:
-        llm_eval, usage = llm_based_grading(concepts, quiz_data, return_usage=True)
-    else:
-        llm_eval = llm_based_grading(concepts, quiz_data)
-        usage = {}
+    llm_eval, usage = llm_based_grading(concepts, quiz_data)
 
     # We consider it passed if code grading is perfect and fidelity is >= 4
     passed = (code_score == 1.0) and (llm_eval.get("task_fidelity_score", 0) >= 4)
@@ -287,7 +286,5 @@ def verify_quiz(concepts, quiz_data, expected_count, *, return_usage: bool = Fal
         "pedagogical_score": llm_eval.get("pedagogical_score"),
         "evaluator_reasoning": llm_eval.get("reasoning"),
     }
-    if return_usage:
-        return report, usage
-    return report
+    return report, usage
 
