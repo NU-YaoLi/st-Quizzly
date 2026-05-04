@@ -193,6 +193,8 @@ _reinforce_quizzly_config()
 _load_module("bknd.quizzly_question_upldprcs", _root / "bknd" / "quizzly_question_upldprcs.py")
 _reinforce_quizzly_config()
 _load_module("bknd.quizzly_rate_limit", _root / "bknd" / "quizzly_rate_limit.py")
+# Shared text helpers used by lightweight views.
+_load_module("bknd.quizzly_text", _root / "bknd" / "quizzly_text.py")
 # Eager-load the rest of the bknd surface so the first request doesn't trip the
 # Python 3.14 dotted-import KeyError on a cold worker.
 _reinforce_quizzly_config()
@@ -213,14 +215,6 @@ _load_module("fntnd.quizzly_client_ip", _root / "fntnd" / "quizzly_client_ip.py"
 
 # Explicitly load view modules to avoid Python 3.14 KeyError during normal import resolution.
 _load_package("fntnd.views", _root / "fntnd" / "views" / "__init__.py")
-# Helpers must load before the view submodules that depend on them. Keeping the
-# helper in its own module (instead of fntnd/views/__init__.py) prevents view
-# files from depending on their own package's init, which is the most common
-# place the cold-start race shows up.
-_load_module(
-    "fntnd.views._helpers",
-    _root / "fntnd" / "views" / "_helpers.py",
-)
 _reinforce_quizzly_config()
 _load_module(
     "fntnd.views.quizzly_current_quiz_mistakes",

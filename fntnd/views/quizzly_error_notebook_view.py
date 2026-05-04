@@ -9,7 +9,7 @@ Includes a clear-history action that writes the empty list back to disk.
 import streamlit as st
 
 from fntnd.quizzly_state import load_error_history, save_error_history
-from fntnd.views._helpers import clean_option_text
+from bknd.quizzly_text import clean_option_text
 from quizzly_config import ANSWER_LETTERS
 
 

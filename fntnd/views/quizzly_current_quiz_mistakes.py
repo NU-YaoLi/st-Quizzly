@@ -8,7 +8,7 @@ and lets the user save those mistakes into the all-time error notebook via the
 
 import streamlit as st
 
-from fntnd.views._helpers import clean_option_text
+from bknd.quizzly_text import clean_option_text
 from quizzly_config import ANSWER_LETTERS
 
 

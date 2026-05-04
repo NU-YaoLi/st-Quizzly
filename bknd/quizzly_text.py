@@ -1,15 +1,9 @@
-"""Shared helpers for ``fntnd.views`` modules.
-
-Kept in a dedicated module (rather than ``fntnd/views/__init__.py``) so view
-submodules don't have to import from their own package's init. On Python 3.14 +
-Streamlit Cloud, package-level imports are the most fragile point during a
-cold-start dotted-import race, and ``quizzly_main.py`` eager-loads this file
-before any view consumer.
 """
+Lightweight text helpers shared across Quizzly.
 
-# NOTE: deliberately no ``from __future__ import annotations`` — on Python 3.14
-# (PEP 649) deferred annotations interact badly with some module-loading paths
-# we exercise in ``quizzly_main.py``.
+Intentionally kept dependency-free (no Streamlit, no LangChain) so UI modules
+can safely import these helpers without pulling in heavy backend dependencies.
+"""
 
 
 def clean_option_text(s: str) -> str:
@@ -28,3 +22,4 @@ def clean_option_text(s: str) -> str:
         else:
             break
     return t
+
