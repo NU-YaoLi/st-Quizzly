@@ -51,42 +51,98 @@ def _load_module(name: str, file_path: Path) -> None:
         raise
 
 
+# Every public name downstream code imports from ``quizzly_config``. Kept in
+# sync with the module by hand — it's small, slow-moving, and worth the
+# explicit list because it's the only thing standing between us and the
+# Python 3.14 / Streamlit Cloud cold-start cascade.
+_REQUIRED_CONFIG_NAMES = (
+    "MIN_QUESTIONS",
+    "MAX_WEB_URL_SLOTS",
+    "DAILY_GENERATION_LIMIT",
+    "SUPABASE_URL",
+    "QUIZZLY_MODEL",
+    "WEB_CHARS_PER_PAGE",
+    "WEB_TEXT_PER_URL_CAP",
+    "MAX_QUESTIONS_CAP",
+    "FILE_FINGERPRINT_BYTES",
+    "WEB_FETCH_CACHE_TTL_SECS",
+    "ANSWER_LETTERS",
+    "MODEL_PRICING_USD_PER_1K",
+)
+
+# Snapshot of quizzly_config values, populated right after the first successful
+# load. Used to "self-heal" sys.modules['quizzly_config'] if any name later goes
+# missing (which is what the recurring "cannot import name X from quizzly_config"
+# Cloud errors look like).
+_CONFIG_SNAPSHOT: dict[str, object] = {}
+
+
 def _verify_quizzly_config() -> None:
+    """Make sure ``quizzly_config`` has every name downstream code imports.
+
+    On Streamlit Cloud + Python 3.14 we've seen the module land in
+    ``sys.modules`` with only some of its names bound, which then cascades into
+    ``cannot import name 'X' from 'quizzly_config'`` errors several modules
+    later. This function reloads via our own ``_load_module`` (which is what
+    actually works under 3.14), and falls back to the normal import machinery
+    only as a last resort. Any partial module is popped so it can't poison
+    later imports.
+    """
     mod = sys.modules.get("quizzly_config")
-    if mod is None:
-        # Streamlit Cloud + Python 3.14 can occasionally drop sys.modules entries mid-reload.
-        # Reload from disk once rather than crashing.
+    if mod is None or any(not hasattr(mod, n) for n in _REQUIRED_CONFIG_NAMES):
+        # Force a clean reload through our own SourceFileLoader path.
+        sys.modules.pop("quizzly_config", None)
+        importlib.invalidate_caches()
         _load_module("quizzly_config", _root / "quizzly_config.py")
         mod = sys.modules.get("quizzly_config")
     if mod is None:
         raise ImportError("quizzly_config was not registered in sys.modules.")
-    required = (
-        "MIN_QUESTIONS",
-        "DAILY_GENERATION_LIMIT",
-        "ANSWER_LETTERS",
-        "SUPABASE_URL",
-        "QUIZZLY_MODEL",
-        "MODEL_PRICING_USD_PER_1K",
-    )
-    missing = [n for n in required if not hasattr(mod, n)]
+    missing = [n for n in _REQUIRED_CONFIG_NAMES if not hasattr(mod, n)]
     if missing:
-        # One more attempt: import via normal import machinery (sometimes more stable on Cloud reloads).
+        # Last-ditch fallback: try the normal import machinery.
         try:
             sys.modules.pop("quizzly_config", None)
             importlib.invalidate_caches()
             mod2 = importlib.import_module("quizzly_config")
-            missing2 = [n for n in required if not hasattr(mod2, n)]
+            missing2 = [n for n in _REQUIRED_CONFIG_NAMES if not hasattr(mod2, n)]
             if not missing2:
                 sys.modules["quizzly_config"] = mod2
                 return
+            # Don't leave a partially-bound module in sys.modules — it would
+            # silently feed downstream "cannot import name" errors on retry.
+            sys.modules.pop("quizzly_config", None)
             mod = mod2
             missing = missing2
         except Exception:
-            pass
+            sys.modules.pop("quizzly_config", None)
         raise ImportError(
             f"quizzly_config from {getattr(mod, '__file__', '?')} is missing names {missing}. "
             "If this is Streamlit Cloud, confirm quizzly_config.py is committed and not overwritten."
         )
+
+
+def _snapshot_quizzly_config() -> None:
+    """Cache every required ``quizzly_config`` value after the initial load."""
+    mod = sys.modules["quizzly_config"]
+    for n in _REQUIRED_CONFIG_NAMES:
+        _CONFIG_SNAPSHOT[n] = getattr(mod, n)
+
+
+def _reinforce_quizzly_config() -> None:
+    """Re-bind any required names that vanished from ``sys.modules['quizzly_config']``.
+
+    Cheap (just ``hasattr`` + ``setattr``) and idempotent. Called between
+    eager loads so a downstream ``from quizzly_config import X`` can never hit
+    a half-stripped module on Python 3.14 + Streamlit Cloud.
+    """
+    mod = sys.modules.get("quizzly_config")
+    if mod is None or not _CONFIG_SNAPSHOT:
+        # Nothing to reinforce yet — defer to the full verify path.
+        _verify_quizzly_config()
+        return
+    for name, value in _CONFIG_SNAPSHOT.items():
+        if not hasattr(mod, name):
+            setattr(mod, name, value)
 
 
 def _load_package(name: str, init_path: Path) -> None:
@@ -118,6 +174,7 @@ def _load_package(name: str, init_path: Path) -> None:
 
 _load_module("quizzly_config", _root / "quizzly_config.py")
 _verify_quizzly_config()
+_snapshot_quizzly_config()
 _load_package("bknd", _root / "bknd" / "__init__.py")
 
 import streamlit as st
@@ -125,18 +182,34 @@ import streamlit as st
 st.set_page_config(page_title="Quizzly", page_icon="📖", layout="wide")
 
 # Load backend modules by path (avoid Python 3.14 Cloud dotted-import KeyError).
-# Order matters: dependents come after their dependencies.
+# Order matters: dependents come after their dependencies. ``_reinforce_quizzly_config``
+# is a cheap pre-check that re-binds any config name that may have been
+# stripped from sys.modules between the previous step and this one — that's the
+# defensive answer to the recurring "cannot import name X from quizzly_config".
+_reinforce_quizzly_config()
 _load_module("bknd.quizzly_usage_log", _root / "bknd" / "quizzly_usage_log.py")
 _load_module("bknd.quizzly_user_ip", _root / "bknd" / "quizzly_user_ip.py")
+_reinforce_quizzly_config()
 _load_module("bknd.quizzly_question_upldprcs", _root / "bknd" / "quizzly_question_upldprcs.py")
+_reinforce_quizzly_config()
 _load_module("bknd.quizzly_rate_limit", _root / "bknd" / "quizzly_rate_limit.py")
 # Eager-load the rest of the bknd surface so the first request doesn't trip the
 # Python 3.14 dotted-import KeyError on a cold worker.
+_reinforce_quizzly_config()
 _load_module("bknd.quizzly_question_gnrt", _root / "bknd" / "quizzly_question_gnrt.py")
+_reinforce_quizzly_config()
 _load_module("bknd.quizzly_question_vrf", _root / "bknd" / "quizzly_question_vrf.py")
+_reinforce_quizzly_config()
 _load_module("bknd.quizzly_analytics", _root / "bknd" / "quizzly_analytics.py")
 
 _load_package("fntnd", _root / "fntnd" / "__init__.py")
+
+# Eager-load fntnd helpers BEFORE the views and the main UI, so any
+# ``from fntnd.quizzly_state import ...`` / ``from fntnd.quizzly_client_ip import ...``
+# resolves through sys.modules instead of tripping the 3.14 dotted-import KeyError.
+_reinforce_quizzly_config()
+_load_module("fntnd.quizzly_state", _root / "fntnd" / "quizzly_state.py")
+_load_module("fntnd.quizzly_client_ip", _root / "fntnd" / "quizzly_client_ip.py")
 
 # Explicitly load view modules to avoid Python 3.14 KeyError during normal import resolution.
 _load_package("fntnd.views", _root / "fntnd" / "views" / "__init__.py")
@@ -148,6 +221,7 @@ _load_module(
     "fntnd.views._helpers",
     _root / "fntnd" / "views" / "_helpers.py",
 )
+_reinforce_quizzly_config()
 _load_module(
     "fntnd.views.quizzly_current_quiz_mistakes",
     _root / "fntnd" / "views" / "quizzly_current_quiz_mistakes.py",
@@ -166,6 +240,7 @@ _load_module(
 )
 
 # Then load the main frontend module by path.
+_reinforce_quizzly_config()
 _load_module("fntnd.quizzly_ftnd", _root / "fntnd" / "quizzly_ftnd.py")
 if not hasattr(sys.modules.get("fntnd.quizzly_ftnd"), "main"):
     raise ImportError("Failed to load fntnd.quizzly_ftnd.main (module did not finish initializing).")
