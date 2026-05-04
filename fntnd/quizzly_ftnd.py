@@ -2,6 +2,7 @@ import json
 import mimetypes
 import os
 import tempfile
+import textwrap
 import time
 import traceback
 import uuid
@@ -119,35 +120,106 @@ def main():
     debug_enabled = bool(st.secrets.get("DEBUG", False)) or (os.environ.get("DEBUG") == "1")
     view = (qp.get("view") or "").strip().lower()
 
-    # Hydrate public client IPv4 via browser → api.ipify.org (out-of-China workflow first; CN fallbacks later).
-    # Run in the main render path so streamlit-javascript can resolve before actions that read get_client_ip().
+    # Hydrate public client IPv4 via browser. Uses an async IIFE (streamlit-javascript runs
+    # `await eval(js_code)`, so top-level `await` is invalid; an IIFE returns a Promise that
+    # `await` can unwrap). Multi-endpoint with IPv4 preference so a single blocked endpoint
+    # (e.g. ipify in some regions) does not leave us with an empty IP.
+    _IP_WARMUP_MAX_ATTEMPTS = 3
+    _ip_should_rerun = False
     try:
         from streamlit_javascript import st_javascript  # type: ignore
 
         if not st.session_state.get("_quizzly_public_ip_js"):
-            # Public IPv4 via browser (works when server-side IP is a private hop, e.g. Streamlit Cloud).
-            # streamlit-javascript runs `await eval(js_code)` — use a Promise expression, not top-level
-            # `await fetch(...)` (that is invalid inside eval). China / other blocks: add fallbacks later.
-            script = (
-                'fetch("https://api.ipify.org?format=json", { cache: "no-store" })'
-                ".then(function (r) { if (!r.ok) throw new Error('ipify HTTP ' + r.status); return r.json(); })"
-            )
+            script = textwrap.dedent(
+                """
+                (async function () {
+                  function isIPv4(s) {
+                    return /^(\\d{1,3}\\.){3}\\d{1,3}$/.test(String(s || "").trim());
+                  }
+                  function ipFromJson(j) {
+                    if (!j || typeof j !== "object") return "";
+                    const v = j.ip ?? j.IP ?? j.query;
+                    return v ? String(v).trim() : "";
+                  }
+                  async function firstIp() {
+                    const v4Json = ["https://api.ipify.org?format=json"];
+                    const v4Text = [
+                      "https://checkip.amazonaws.com",
+                      "https://ipv4.icanhazip.com",
+                    ];
+                    for (const url of v4Json) {
+                      try {
+                        const r = await fetch(url, { cache: "no-store" });
+                        if (!r.ok) continue;
+                        const j = await r.json();
+                        const ip = ipFromJson(j);
+                        if (ip && isIPv4(ip)) return { ip };
+                      } catch (e) {}
+                    }
+                    for (const url of v4Text) {
+                      try {
+                        const r = await fetch(url, { cache: "no-store" });
+                        if (!r.ok) continue;
+                        const ip = (await r.text()).trim();
+                        if (ip && isIPv4(ip)) return { ip };
+                      } catch (e) {}
+                    }
+                    const endpoints = [
+                      "https://api64.ipify.org?format=json",
+                      "https://ifconfig.co/json",
+                      "https://ipwho.is/?output=json",
+                      "https://api.ipify.org?format=json",
+                    ];
+                    for (const url of endpoints) {
+                      try {
+                        const r = await fetch(url, { cache: "no-store" });
+                        if (!r.ok) continue;
+                        const j = await r.json();
+                        const ip = ipFromJson(j);
+                        if (ip) return { ip };
+                      } catch (e) {}
+                    }
+                    return { error: "all IP endpoints failed" };
+                  }
+                  try { return await firstIp(); }
+                  catch (e) { return { error: String((e && e.message) || e) }; }
+                })()
+                """
+            ).strip()
             res = st_javascript(
                 script,
                 default=None,
-                key="quizzly_public_ip_ipify_json",
+                key="quizzly_public_ip_v4_async_iife",
             )
             if isinstance(res, dict) and res.get("ip"):
                 new_ip = str(res["ip"]).strip()
                 prev_ip = st.session_state.get("_quizzly_public_ip_js")
                 st.session_state["_quizzly_public_ip_js"] = new_ip
                 st.session_state.pop("_quizzly_public_ip_js_err", None)
+                st.session_state["_quizzly_ip_warmup_attempts"] = _IP_WARMUP_MAX_ATTEMPTS
                 if prev_ip != new_ip:
                     st.session_state.pop("_quizzly_user_ip_id", None)
-            elif debug_enabled and isinstance(res, str) and res.strip():
+            elif isinstance(res, dict) and res.get("error"):
+                st.session_state["_quizzly_public_ip_js_err"] = str(res["error"])[:500]
+                st.session_state["_quizzly_ip_warmup_attempts"] = _IP_WARMUP_MAX_ATTEMPTS
+            elif isinstance(res, str) and res.strip():
                 st.session_state["_quizzly_public_ip_js_err"] = res.strip()[:500]
-    except Exception:
-        pass
+                st.session_state["_quizzly_ip_warmup_attempts"] = _IP_WARMUP_MAX_ATTEMPTS
+            else:
+                # `res` is None/0 → component hasn't phoned home yet. Schedule a brief rerun
+                # to give Streamlit's auto-rerun a chance (capped to avoid infinite loops).
+                attempts = int(st.session_state.get("_quizzly_ip_warmup_attempts", 0))
+                if attempts < _IP_WARMUP_MAX_ATTEMPTS:
+                    st.session_state["_quizzly_ip_warmup_attempts"] = attempts + 1
+                    _ip_should_rerun = True
+    except Exception as _ip_e:
+        st.session_state["_quizzly_public_ip_js_err"] = (
+            f"hydrate: {type(_ip_e).__name__}: {_ip_e!s}"
+        )[:500]
+    # Trigger the rerun OUTSIDE the try so st.rerun()'s RerunException isn't swallowed.
+    if _ip_should_rerun:
+        time.sleep(0.4)
+        st.rerun()
     if debug_enabled and st.session_state.get("_quizzly_public_ip_js_err"):
         st.caption("Client IP (browser JS) debug: " + str(st.session_state["_quizzly_public_ip_js_err"]))
 
