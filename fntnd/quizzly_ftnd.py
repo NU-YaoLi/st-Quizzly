@@ -1,12 +1,11 @@
+import hashlib
 import json
 import mimetypes
 import os
 import tempfile
-import textwrap
 import time
 import traceback
 import uuid
-import hashlib
 
 import streamlit as st
 from openai import OpenAIError
@@ -28,6 +27,7 @@ from bknd.quizzly_question_upldprcs import (
 )
 from bknd.quizzly_rate_limit import (
     check_daily_generation_allowed,
+    get_client_ip,
     record_successful_generation,
 )
 from bknd.quizzly_usage_log import QuizGenerationUsageFields, token_triple_from_breakdown
@@ -70,6 +70,7 @@ from quizzly_config import (
     WEB_FETCH_CACHE_TTL_SECS,
 )
 
+from fntnd.quizzly_client_ip import hydrate_public_ip, render_ip_debug_caption
 from fntnd.quizzly_state import (
     get_or_create_client_id,
     get_query_params,
@@ -120,117 +121,13 @@ def main():
     debug_enabled = bool(st.secrets.get("DEBUG", False)) or (os.environ.get("DEBUG") == "1")
     view = (qp.get("view") or "").strip().lower()
 
-    # Hydrate public client IPv4 via browser. Uses an async IIFE (streamlit-javascript runs
-    # `await eval(js_code)`, so top-level `await` is invalid; an IIFE returns a Promise that
-    # `await` can unwrap). Multi-endpoint with IPv4 preference so a single blocked endpoint
-    # (e.g. ipify in some regions) does not leave us with an empty IP.
-    _IP_WARMUP_MAX_ATTEMPTS = 8
-    _ip_should_rerun = False
-    try:
-        from streamlit_javascript import st_javascript  # type: ignore
-
-        if not st.session_state.get("_quizzly_public_ip_js"):
-            script = textwrap.dedent(
-                """
-                (async function () {
-                  function isIPv4(s) {
-                    return /^(\\d{1,3}\\.){3}\\d{1,3}$/.test(String(s || "").trim());
-                  }
-                  function ipFromJson(j) {
-                    if (!j || typeof j !== "object") return "";
-                    const v = j.ip ?? j.IP ?? j.query;
-                    return v ? String(v).trim() : "";
-                  }
-                  async function firstIp() {
-                    const v4Json = ["https://api.ipify.org?format=json"];
-                    const v4Text = [
-                      "https://checkip.amazonaws.com",
-                      "https://ipv4.icanhazip.com",
-                    ];
-                    for (const url of v4Json) {
-                      try {
-                        const r = await fetch(url, { cache: "no-store" });
-                        if (!r.ok) continue;
-                        const j = await r.json();
-                        const ip = ipFromJson(j);
-                        if (ip && isIPv4(ip)) return { ip };
-                      } catch (e) {}
-                    }
-                    for (const url of v4Text) {
-                      try {
-                        const r = await fetch(url, { cache: "no-store" });
-                        if (!r.ok) continue;
-                        const ip = (await r.text()).trim();
-                        if (ip && isIPv4(ip)) return { ip };
-                      } catch (e) {}
-                    }
-                    const endpoints = [
-                      "https://api64.ipify.org?format=json",
-                      "https://ifconfig.co/json",
-                      "https://ipwho.is/?output=json",
-                      "https://api.ipify.org?format=json",
-                    ];
-                    for (const url of endpoints) {
-                      try {
-                        const r = await fetch(url, { cache: "no-store" });
-                        if (!r.ok) continue;
-                        const j = await r.json();
-                        const ip = ipFromJson(j);
-                        if (ip) return { ip };
-                      } catch (e) {}
-                    }
-                    return { error: "all IP endpoints failed" };
-                  }
-                  try { return await firstIp(); }
-                  catch (e) { return { error: String((e && e.message) || e) }; }
-                })()
-                """
-            ).strip()
-            # Note: older PyPI builds of `streamlit-javascript` only accept `(js_code, key)`,
-            # so we deliberately do NOT pass `default=` here. The component returns 0 until
-            # the JS resolves, which we treat the same as None below.
-            res = st_javascript(
-                script,
-                key="quizzly_public_ip_v4_async_iife",
-            )
-            if isinstance(res, dict) and res.get("ip"):
-                new_ip = str(res["ip"]).strip()
-                prev_ip = st.session_state.get("_quizzly_public_ip_js")
-                st.session_state["_quizzly_public_ip_js"] = new_ip
-                st.session_state.pop("_quizzly_public_ip_js_err", None)
-                st.session_state["_quizzly_ip_warmup_attempts"] = _IP_WARMUP_MAX_ATTEMPTS
-                if prev_ip != new_ip:
-                    st.session_state.pop("_quizzly_user_ip_id", None)
-            elif isinstance(res, dict) and res.get("error"):
-                st.session_state["_quizzly_public_ip_js_err"] = str(res["error"])[:500]
-                st.session_state["_quizzly_ip_warmup_attempts"] = _IP_WARMUP_MAX_ATTEMPTS
-            elif isinstance(res, str) and res.strip():
-                st.session_state["_quizzly_public_ip_js_err"] = res.strip()[:500]
-                st.session_state["_quizzly_ip_warmup_attempts"] = _IP_WARMUP_MAX_ATTEMPTS
-            else:
-                # `res` is None/0 → component hasn't phoned home yet. Schedule a brief rerun
-                # to give Streamlit's auto-rerun a chance (capped to avoid infinite loops).
-                attempts = int(st.session_state.get("_quizzly_ip_warmup_attempts", 0))
-                if attempts < _IP_WARMUP_MAX_ATTEMPTS:
-                    st.session_state["_quizzly_ip_warmup_attempts"] = attempts + 1
-                    _ip_should_rerun = True
-    except Exception as _ip_e:
-        st.session_state["_quizzly_public_ip_js_err"] = (
-            f"hydrate: {type(_ip_e).__name__}: {_ip_e!s}"
-        )[:500]
-    # Trigger the rerun OUTSIDE the try so st.rerun()'s RerunException isn't swallowed.
-    if _ip_should_rerun:
-        time.sleep(0.5)
-        st.rerun()
-    if debug_enabled and st.session_state.get("_quizzly_public_ip_js_err"):
-        st.caption("Client IP (browser JS) debug: " + str(st.session_state["_quizzly_public_ip_js_err"]))
+    # Mount the browser-side IP fetch (no-op once cached). The component resolves
+    # asynchronously; Streamlit auto-reruns when the value lands. We do not block
+    # first paint waiting for it — the click handler below has its own short retry
+    # loop so a fast click never starts a long generation with ip="unknown".
+    hydrate_public_ip()
     if debug_enabled:
-        # Surface the *current* state so we can tell unknown-because-blocked from unknown-because-pending.
-        _dbg_ip = st.session_state.get("_quizzly_public_ip_js") or "(not set)"
-        _dbg_attempts = st.session_state.get("_quizzly_ip_warmup_attempts", 0)
-        st.caption(
-            f"Client IP debug — js_cache={_dbg_ip}, warmup_attempts={_dbg_attempts}/{_IP_WARMUP_MAX_ATTEMPTS}"
-        )
+        render_ip_debug_caption()
 
     # If Streamlit reset our session_state (WebSocket reconnect / idle), try to rehydrate
     # from cached/disk state using URL params.
@@ -695,28 +592,24 @@ def main():
         # Dedicated slot so workflow progress is always visible in the same place.
         workflow_slot = st.container()
 
-        # Final safety net: do NOT start a multi-second generation while the public IP is
-        # still hydrating. Without this, a fast click after page load can record a row with
-        # ip="unknown" (and country/region/city = NULL) even though the JS would have
-        # resolved a few hundred ms later. We persist the click intent across short reruns
-        # via `_quizzly_pending_generate` (Streamlit's `button` only returns True on the
-        # click-rerun itself).
-        from bknd.quizzly_rate_limit import get_client_ip as _ip_for_guard
-
+        # Streamlit's `button` returns True only on the click-rerun, so we persist the
+        # click intent across the short reruns we use to wait for IP hydration.
         _generate_requested = bool(generate_btn) or bool(
             st.session_state.get("_quizzly_pending_generate")
         )
 
-        if _generate_requested and _ip_for_guard() == "unknown":
-            _click_retries = int(st.session_state.get("_quizzly_ip_click_retries", 0))
-            if _click_retries < 4:
-                st.session_state["_quizzly_ip_click_retries"] = _click_retries + 1
+        # Click-time IP guard: don't start a multi-second generation while the public
+        # IP is still hydrating, or we'd record ip="unknown" (and NULL country/region/
+        # city) even though the JS would have resolved moments later.
+        if _generate_requested and get_client_ip() == "unknown":
+            retries = int(st.session_state.get("_quizzly_ip_click_retries", 0))
+            if retries < 4:
+                st.session_state["_quizzly_ip_click_retries"] = retries + 1
                 st.session_state["_quizzly_pending_generate"] = True
                 with workflow_slot:
                     st.info("Detecting your network info… retrying in a moment.")
                 time.sleep(0.6)
                 st.rerun()
-            # Retries exhausted: proceed with "unknown" rather than blocking the user.
             st.session_state.pop("_quizzly_ip_click_retries", None)
 
         if _generate_requested:
