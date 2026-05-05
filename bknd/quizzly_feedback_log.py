@@ -1,20 +1,18 @@
 """
 Persist visitor feedback in Supabase ``user_feedback``.
 
-Rows reference ``user_ip`` by the canonical ``ip`` text (unique on ``user_ip``),
-so you can join with:
+Rows reference ``user_ip`` by id, so you can join with:
 
     select f.*, u.id as user_ip_id, u.country
     from public.user_feedback f
-    join public.user_ip u on u.ip = f.ip;
+    join public.user_ip u on u.id = f.user_ip_id;
 """
 
 import math
 import re
-from typing import Any
 
 from bknd.quizzly_rate_limit import get_client_ip, supabase_admin_client
-from bknd.quizzly_user_ip import USER_IP_TABLE, get_or_create_user_ip_id
+from bknd.quizzly_user_ip import get_or_create_user_ip_id
 
 FEEDBACK_TABLE = "user_feedback"
 _MAX_BODY = 4000
@@ -50,18 +48,6 @@ def _slug_category(raw: str | None) -> str | None:
         return None
     t = re.sub(r"[^a-z0-9_-]+", "-", t).strip("-")
     return (t[:64] or None)
-
-
-def _canonical_ip_for_user_ip_id(supabase: Any, user_ip_id: str) -> str | None:
-    try:
-        res = supabase.table(USER_IP_TABLE).select("ip").eq("id", user_ip_id).limit(1).execute()
-        rows = res.data or []
-        if rows:
-            ip = (rows[0].get("ip") or "").strip()
-            return ip or None
-    except Exception:
-        return None
-    return None
 
 
 def _optional_user_agent() -> str | None:
@@ -114,12 +100,8 @@ def submit_user_feedback(
     if uerr or not uid:
         return False, f"Could not resolve visitor identity: {uerr or 'unknown error'}"
 
-    ip_key = _canonical_ip_for_user_ip_id(supabase, uid)
-    if not ip_key:
-        return False, "Could not read canonical IP for feedback row."
-
     row = {
-        "ip": ip_key,
+        "user_ip_id": uid,
         "category": _slug_category(category),
         "subject": _clip(subject, _MAX_SUBJECT),
         "body": text,

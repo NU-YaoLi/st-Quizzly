@@ -92,12 +92,12 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------------------
--- Visitor feedback (joins to user_ip on ip — same canonical string as user_ip.ip)
+-- Visitor feedback (joins to user_ip by user_ip_id -> user_ip.id)
 -- ---------------------------------------------------------------------------
 create table public.user_feedback (
   id uuid not null default gen_random_uuid (),
   created_at timestamp with time zone not null default now(),
-  ip text not null,
+  user_ip_id uuid not null,
   category text null,
   subject text null,
   body text not null,
@@ -105,7 +105,7 @@ create table public.user_feedback (
   client_id text null,
   user_agent text null,
   constraint user_feedback_pkey primary key (id),
-  constraint user_feedback_ip_fkey foreign KEY (ip) references user_ip (ip) on delete restrict,
+  constraint user_feedback_user_ip_id_fkey foreign KEY (user_ip_id) references user_ip (id) on delete restrict,
   constraint user_feedback_body_len check (
     char_length(body) >= 1
     and char_length(body) <= 8000
@@ -132,13 +132,14 @@ create table public.user_feedback (
   )
 ) TABLESPACE pg_default;
 
-create index if not exists user_feedback_ip_created_at_idx on public.user_feedback using btree (ip, created_at desc) TABLESPACE pg_default;
+create index if not exists user_feedback_user_ip_id_created_at_idx
+  on public.user_feedback using btree (user_ip_id, created_at desc) TABLESPACE pg_default;
 
 create index if not exists user_feedback_created_at_idx on public.user_feedback using btree (created_at desc) TABLESPACE pg_default;
 
-comment on table public.user_feedback is 'User-submitted feedback; join to user_ip on ip (unique) or aggregate by ip / day.';
+comment on table public.user_feedback is 'User-submitted feedback; join to user_ip by user_ip_id; aggregate by visitor and day.';
 
-comment on column public.user_feedback.ip is 'Canonical IP string; FK to user_ip.ip for fast visitor-scoped joins.';
+comment on column public.user_feedback.user_ip_id is 'FK to user_ip.id for visitor-scoped joins.';
 
 comment on column public.user_feedback.quiz_id is 'Optional opaque quiz id from the app URL (not a DB FK).';
 
