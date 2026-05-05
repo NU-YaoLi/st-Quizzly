@@ -9,7 +9,6 @@ Includes a clear-history action that writes the empty list back to disk.
 import streamlit as st
 
 from fntnd.quizzly_state import load_error_history, save_error_history
-from bknd.quizzly_text import clean_option_text
 from quizzly_config import ANSWER_LETTERS
 
 
@@ -44,7 +43,8 @@ def render_error_notebook_view(*, client_id: str, quiz_id: str) -> None:
             if options:
                 for i, opt in enumerate(options):
                     letter = ANSWER_LETTERS[i] if i < len(ANSWER_LETTERS) else str(i)
-                    st.markdown(f"**{letter})** {clean_option_text(opt)}")
+                    # Options are already labeled by the model (e.g., "A) ...").
+                    st.markdown(str(opt))
 
             user_letter = error.get("user_answer_letter")
             correct_letter = error.get("correct_option")

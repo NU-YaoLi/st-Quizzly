@@ -1055,7 +1055,8 @@ def main():
                     user_answers[q["id"]] = st.radio(
                         "Answer",
                         options=range(len(options)),
-                        format_func=lambda idx: options[idx],
+                        # Options are already labeled by the model (e.g., "A) ...").
+                        format_func=lambda idx: str(options[idx]),
                         key=widget_key,
                         index=None,
                         label_visibility="collapsed",

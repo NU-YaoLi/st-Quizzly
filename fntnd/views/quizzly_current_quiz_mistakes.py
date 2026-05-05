@@ -8,7 +8,6 @@ and lets the user save those mistakes into the all-time error notebook via the
 
 import streamlit as st
 
-from bknd.quizzly_text import clean_option_text
 from quizzly_config import ANSWER_LETTERS
 
 
@@ -43,7 +42,8 @@ def render_current_quiz_mistakes(*, client_id: str, quiz_id: str, persist_cb) ->
                 if options:
                     for i, opt in enumerate(options):
                         letter = ANSWER_LETTERS[i] if i < len(ANSWER_LETTERS) else str(i)
-                        st.markdown(f"**{letter})** {clean_option_text(opt)}")
+                        # Options are already labeled by the model (e.g., "A) ...").
+                        st.markdown(str(opt))
 
                 user_letter = error.get("user_answer_letter")
                 correct_letter = error.get("correct_option")

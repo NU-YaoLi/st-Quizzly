@@ -16,13 +16,11 @@ All LLM-using helpers return ``(result, usage)`` for cost aggregation.
 """
 
 import json
-import re
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_openai import ChatOpenAI
 
-from bknd.quizzly_text import clean_option_text
 from quizzly_config import ANSWER_LETTERS, QUIZZLY_MODEL
 
 # Single source of truth for the per-question schema. Used by both the strict
@@ -48,33 +46,6 @@ def _question_constraint_error(q, idx_label: str) -> str | None:
     if q.get("correct_option") not in ANSWER_LETTERS:
         return f"Question {q.get('id', idx_label)} has invalid correct_option."
     return None
-
-
-def _normalize_quiz_options(quiz: dict) -> dict:
-    """Normalize options + explanation so UI rendering stays clean."""
-    if not isinstance(quiz, dict):
-        return quiz
-    questions = quiz.get("questions")
-    if not isinstance(questions, list):
-        return quiz
-
-    # If the model uses "A) ..." inside explanations, normalize to "Option A ..."
-    # so it reads well and continues to work with explanation remapping after
-    # option rebalancing.
-    expl_prefix = re.compile(
-        r"(?m)^\s*[\(\[\{]?\s*([ABCD])\s*[\)\]\}]?\s*[\)\.\:\-\u2013\u2014\uFF09]\s+",
-        re.IGNORECASE,
-    )
-    for q in questions:
-        if not isinstance(q, dict):
-            continue
-        opts = q.get("options")
-        if not isinstance(opts, list):
-            continue
-        q["options"] = [clean_option_text(str(o)) for o in opts]
-        if isinstance(q.get("explanation"), str):
-            q["explanation"] = expl_prefix.sub(lambda m: f"Option {m.group(1).upper()} ", q["explanation"])
-    return quiz
 
 
 def _remap_explanation_letters(expl: str, mapping: dict[str, str]) -> str:
@@ -116,10 +87,6 @@ def rebalance_correct_options_evenly(quiz: dict) -> dict:
         if corr not in ANSWER_LETTERS:
             continue
 
-        # Clean option strings (avoid "A) " etc).
-        clean_opts = [clean_option_text(str(o)) for o in opts]
-        q["options"] = clean_opts
-
         old_idx = ANSWER_LETTERS.index(corr)
         target_letter = targets[i % 4]
         target_idx = ANSWER_LETTERS.index(target_letter)
@@ -132,7 +99,7 @@ def rebalance_correct_options_evenly(quiz: dict) -> dict:
         mapping: dict[str, str] = {}
         for j in range(4):
             nj = (j + shift) % 4
-            new_opts[nj] = clean_opts[j]
+            new_opts[nj] = opts[j]
             mapping[ANSWER_LETTERS[j]] = ANSWER_LETTERS[nj]
 
         q["options"] = new_opts  # type: ignore[assignment]
@@ -192,14 +159,14 @@ def run_quiz_output_guard(quiz_data: dict) -> dict:
     out = chain.invoke({"quiz": quiz_data})
     status = out.get("status")
     if status == "ok" and isinstance(out.get("quiz"), dict):
-        return _normalize_quiz_options(out["quiz"])
+        return out["quiz"]
     if status == "rewrite" and isinstance(out.get("quiz"), dict):
-        return _normalize_quiz_options(out["quiz"])
+        return out["quiz"]
     if status == "reject":
         raise ValueError(out.get("reason") or "Quiz failed safety check")
     if isinstance(out.get("quiz"), dict):
-        return _normalize_quiz_options(out["quiz"])
-    return _normalize_quiz_options(quiz_data)
+        return out["quiz"]
+    return quiz_data
 
 
 def code_based_grading(quiz_data, expected_count):
