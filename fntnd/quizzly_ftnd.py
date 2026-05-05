@@ -734,7 +734,9 @@ def main():
                 log_line("Running output safety guard...")
                 quiz_data = run_quiz_output_guard(quiz_data)
                 quiz_data = validate_quiz_shape(quiz_data, num_questions)
-                quiz_data = rebalance_correct_options_evenly(quiz_data)
+                # Disabled: keep model-produced option ordering/labels intact.
+                # (User requested no answer-key rebalancing.)
+                # quiz_data = rebalance_correct_options_evenly(quiz_data)
 
                 report: dict | None = None
                 vrf_usage: dict = {}

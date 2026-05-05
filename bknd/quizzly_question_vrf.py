@@ -16,6 +16,7 @@ All LLM-using helpers return ``(result, usage)`` for cost aggregation.
 """
 
 import json
+import re
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import JsonOutputParser
@@ -50,18 +51,42 @@ def _question_constraint_error(q, idx_label: str) -> str | None:
 
 def _remap_explanation_letters(expl: str, mapping: dict[str, str]) -> str:
     """
-    Remap "Option A/B/C/D" references in explanation text to new letters.
+    Remap option-letter references in explanation text to new letters.
+
+    Supports both:
+    - "Option A" / "Option B" ...
+    - line-start labels like "A) ..." / "B) ..." (multiline)
+
     Uses placeholders to avoid A->B then B->C cascading issues.
     """
     if not expl or not mapping:
         return expl
     s = str(expl)
     placeholders = {k: f"__OPT_{k}__" for k in mapping.keys()}
+
+    # 1) Remap "Option X" mentions.
     for k, ph in placeholders.items():
         s = s.replace(f"Option {k}", f"Option {ph}")
+
+    # 2) Remap line-start "X) " labels (preserve indentation).
+    # Use a placeholder so later replacements don't cascade.
     for k, ph in placeholders.items():
-        s = s.replace(f"Option {ph}", f"Option {mapping.get(k, k)}")
+        s = re.sub(rf"(?m)^(\s*){re.escape(k)}\)\s+", rf"\1{ph}) ", s)
+
+    # Finalize placeholders -> mapped letters.
+    for k, ph in placeholders.items():
+        new_k = mapping.get(k, k)
+        s = s.replace(f"Option {ph}", f"Option {new_k}")
+        s = s.replace(f"{ph}) ", f"{new_k}) ")
     return s
+
+
+_LEADING_OPTION_LABEL_RE = re.compile(r"^\s*[\(\[]?\s*[ABCD]\s*[\)\]]?\s*[\)\.\:\-]\s*", re.IGNORECASE)
+
+
+def _strip_leading_option_label(s: str) -> str:
+    """Remove a leading 'A) ' / '(A) ' / 'A.' / 'A:' etc if present."""
+    return _LEADING_OPTION_LABEL_RE.sub("", str(s or "").strip()).strip()
 
 
 def rebalance_correct_options_evenly(quiz: dict) -> dict:
@@ -87,10 +112,17 @@ def rebalance_correct_options_evenly(quiz: dict) -> dict:
         if corr not in ANSWER_LETTERS:
             continue
 
+        # IMPORTANT: Options are model-labeled ("A) ..."). We may rotate options to
+        # rebalance answer keys, so we must re-label the option strings to match
+        # their new positions, otherwise the UI will show mismatched labels.
+        opts_plain = [_strip_leading_option_label(o) for o in opts]
+
         old_idx = ANSWER_LETTERS.index(corr)
         target_letter = targets[i % 4]
         target_idx = ANSWER_LETTERS.index(target_letter)
         if old_idx == target_idx:
+            # Keep order but ensure labels match positions (A/B/C/D).
+            q["options"] = [f"{ANSWER_LETTERS[j]}) {opts_plain[j]}" for j in range(4)]
             continue
 
         # Compute permutation: move the old correct option to target index by rotation.
@@ -99,10 +131,11 @@ def rebalance_correct_options_evenly(quiz: dict) -> dict:
         mapping: dict[str, str] = {}
         for j in range(4):
             nj = (j + shift) % 4
-            new_opts[nj] = opts[j]
+            new_opts[nj] = opts_plain[j]
             mapping[ANSWER_LETTERS[j]] = ANSWER_LETTERS[nj]
 
-        q["options"] = new_opts  # type: ignore[assignment]
+        # Re-label to match new positions.
+        q["options"] = [f"{ANSWER_LETTERS[j]}) {new_opts[j]}" for j in range(4)]  # type: ignore[index]
         q["correct_option"] = target_letter
         if "explanation" in q and isinstance(q.get("explanation"), str):
             q["explanation"] = _remap_explanation_letters(q["explanation"], mapping)
