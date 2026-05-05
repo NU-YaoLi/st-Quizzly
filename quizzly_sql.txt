@@ -101,46 +101,28 @@ create table public.user_feedback (
   category text null,
   subject text null,
   body text not null,
-  quiz_id text null,
-  client_id text null,
-  user_agent text null,
   constraint user_feedback_pkey primary key (id),
-  constraint user_feedback_user_ip_id_fkey foreign KEY (user_ip_id) references user_ip (id) on delete restrict,
+  constraint user_feedback_user_ip_id_fkey foreign KEY (user_ip_id) references user_ip (id) on delete RESTRICT,
   constraint user_feedback_body_len check (
-    char_length(body) >= 1
-    and char_length(body) <= 8000
-  ),
-  constraint user_feedback_subject_len check (
-    subject is null
-    or char_length(subject) <= 240
+    (
+      (char_length(body) >= 1)
+      and (char_length(body) <= 8000)
+    )
   ),
   constraint user_feedback_category_len check (
-    category is null
-    or char_length(category) <= 64
+    (
+      (category is null)
+      or (char_length(category) <= 64)
+    )
   ),
-  constraint user_feedback_quiz_id_len check (
-    quiz_id is null
-    or char_length(quiz_id) <= 128
-  ),
-  constraint user_feedback_client_id_len check (
-    client_id is null
-    or char_length(client_id) <= 128
-  ),
-  constraint user_feedback_user_agent_len check (
-    user_agent is null
-    or char_length(user_agent) <= 512
+  constraint user_feedback_subject_len check (
+    (
+      (subject is null)
+      or (char_length(subject) <= 240)
+    )
   )
 ) TABLESPACE pg_default;
 
-create index if not exists user_feedback_user_ip_id_created_at_idx
-  on public.user_feedback using btree (user_ip_id, created_at desc) TABLESPACE pg_default;
+create index IF not exists user_feedback_user_ip_id_created_at_idx on public.user_feedback using btree (user_ip_id, created_at desc) TABLESPACE pg_default;
 
-create index if not exists user_feedback_created_at_idx on public.user_feedback using btree (created_at desc) TABLESPACE pg_default;
-
-comment on table public.user_feedback is 'User-submitted feedback; join to user_ip by user_ip_id; aggregate by visitor and day.';
-
-comment on column public.user_feedback.user_ip_id is 'FK to user_ip.id for visitor-scoped joins.';
-
-comment on column public.user_feedback.quiz_id is 'Optional opaque quiz id from the app URL (not a DB FK).';
-
-comment on column public.user_feedback.client_id is 'Optional opaque client id from the app URL for support correlation.';
+create index IF not exists user_feedback_created_at_idx on public.user_feedback using btree (created_at desc) TABLESPACE pg_default;

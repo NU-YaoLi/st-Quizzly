@@ -1,8 +1,7 @@
 """
-Feedback form: inserts into Supabase ``user_feedback`` keyed by ``user_ip.ip``.
+Feedback form: inserts into Supabase ``user_feedback`` linked to ``user_ip`` via ``user_ip_id``.
 
-Does not modify quiz answers or ``quiz_data``; optional ``quiz_id`` / ``client_id``
-are stored only as support context on the feedback row.
+Does not modify quiz answers or ``quiz_data``.
 """
 
 import time
@@ -70,8 +69,6 @@ def render_feedback_view(*, client_id: str, quiz_id: str) -> None:
             body=body,
             category=category,
             subject=subject or None,
-            quiz_id=quiz_id or None,
-            client_id=client_id or None,
         )
         if ok:
             st.success("Thanks — your feedback was saved.")

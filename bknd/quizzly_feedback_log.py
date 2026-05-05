@@ -17,8 +17,6 @@ from bknd.quizzly_user_ip import get_or_create_user_ip_id
 FEEDBACK_TABLE = "user_feedback"
 _MAX_BODY = 4000
 _MAX_SUBJECT = 200
-_MAX_QUIZ_OR_CLIENT = 128
-_MAX_USER_AGENT = 512
 
 
 def _json_safe_row(row: dict) -> dict:
@@ -50,32 +48,11 @@ def _slug_category(raw: str | None) -> str | None:
     return (t[:64] or None)
 
 
-def _optional_user_agent() -> str | None:
-    try:
-        import streamlit as st
-
-        ctx = getattr(st, "context", None)
-        headers = getattr(ctx, "headers", None) if ctx else None
-        if not headers:
-            return None
-        ua = None
-        if hasattr(headers, "get"):
-            ua = headers.get("User-Agent") or headers.get("user-agent")
-        if not ua:
-            return None
-        s = str(ua).strip()
-        return s[:_MAX_USER_AGENT] if s else None
-    except Exception:
-        return None
-
-
 def submit_user_feedback(
     *,
     body: str,
     category: str | None = None,
     subject: str | None = None,
-    quiz_id: str | None = None,
-    client_id: str | None = None,
 ) -> tuple[bool, str | None]:
     """
     Ensure ``user_ip`` exists for the current client IP, then insert one feedback row.
@@ -105,9 +82,6 @@ def submit_user_feedback(
         "category": _slug_category(category),
         "subject": _clip(subject, _MAX_SUBJECT),
         "body": text,
-        "quiz_id": _clip(quiz_id, _MAX_QUIZ_OR_CLIENT),
-        "client_id": _clip(client_id, _MAX_QUIZ_OR_CLIENT),
-        "user_agent": _optional_user_agent(),
     }
 
     try:
