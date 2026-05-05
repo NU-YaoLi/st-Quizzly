@@ -10,7 +10,7 @@ MIN_QUESTIONS = 3
 MAX_WEB_URL_SLOTS = 5
 
 # Supabase-backed daily generation cap (per salted IP hash, UTC day).
-DAILY_GENERATION_LIMIT = 3
+DAILY_GENERATION_LIMIT = 100
 
 # Supabase project URL (public). The service role key stays in Streamlit secrets
 # (`SUPABASE_SERVICE_ROLE_KEY`) and is required for server-side rate limit + usage logging.

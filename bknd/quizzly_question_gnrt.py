@@ -201,8 +201,11 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
    - Hard: requires analyzing trade-offs, diagnosing an error, or choosing the best justification (1+ reasoning steps or comparison).
    - **Hard must still be readable:** use plain language, short sentences, and avoid overly academic phrasing. Prefer clarity over formality.
    - Keep Hard question stems concise (target: ≤ 40 words unless absolutely necessary).
-14. **Ordering:** You MUST present the questions strictly in ascending order of difficulty (Easy -> Medium -> Hard). Assign the correct "difficulty" label to each.
-15. **Explanations (More Pedagogical, Less Fluff):**
+14. **Answer Key Balance (Important):** Distribute the correct answers evenly across A/B/C/D for the *whole quiz*.
+   - For N questions, the counts of A/B/C/D must be as even as possible (difference between any two letters is at most 1).
+   - Do this by designing the options so the correct answer naturally lands on different letters; do NOT game this with weird wording.
+15. **Ordering:** You MUST present the questions strictly in ascending order of difficulty (Easy -> Medium -> Hard). Assign the correct "difficulty" label to each.
+16. **Explanations (More Pedagogical, Less Fluff):**
    - The explanation MUST follow this structure:
      1) 1–2 sentences: why the correct option is correct, tied to the key condition(s) in the stem.
      2) Then 1 sentence per option (A/B/C/D), each starting with "A)"/"B)"/"C)"/"D)" explaining why that option is correct/incorrect.
@@ -245,8 +248,8 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
         "C) He is utilizing the most effective pedagogical framework available.",
         "D) He will avoid context window degradation."
       ],
-      "correct_option": "B",
-      "explanation": "Reading and highlighting can create an illusion of competence because it feels fluent, but without retrieval practice and feedback you often overestimate mastery and underperform on tests.\\n\\nA) Incorrect: passive review alone is usually weaker for durable retention than retrieval practice.\\n\\nB) Correct: without testing and feedback, you can feel confident but still perform poorly on the exam.\\n\\nC) Incorrect: the effective approach is to add practice testing and feedback loops, not rely only on highlighting.\\n\\nD) Incorrect: context windows are an AI concept and do not explain human exam performance here."
+      "correct_option": "A",
+      "explanation": "Highlighting without practice tests often leads to overconfidence because it feels familiar, but it does not prove you can recall the material under exam conditions.\\n\\nA) Correct: he may feel confident but still do poorly because he did not practice retrieving the information.\\n\\nB) Incorrect: long-term retention is not guaranteed from highlighting alone.\\n\\nC) Incorrect: highlighting by itself is not the most effective framework for learning.\\n\\nD) Incorrect: context windows are an AI concept and do not explain human exam performance here."
     }},
     {{
       "id": 3,
@@ -258,8 +261,8 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
         "C) Switch to highlighting only, since it reduces cognitive load and prevents confusion.",
         "D) Avoid quizzes until the material feels easy, then test at the end."
       ],
-      "correct_option": "A",
-      "explanation": "Immediate feedback paired with retrieval practice helps correct misconceptions and strengthens the ability to apply knowledge in new contexts (transfer).\\n\\nA) Correct: feedback helps you fix repeated mistakes and improves transfer to new questions.\\n\\nB) Incorrect: familiarity from rereading can overestimate mastery without improving recall under test conditions.\\n\\nC) Incorrect: highlighting alone is passive and does not address repeated errors.\\n\\nD) Incorrect: delaying testing reduces chances for corrective feedback and durable learning."
+      "correct_option": "D",
+      "explanation": "Immediate feedback plus retrieval practice is what fixes repeated mistakes and improves transfer to new questions.\\n\\nA) Correct: feedback helps you correct the specific misunderstanding and learn how to apply the idea.\\n\\nB) Incorrect: rereading can feel familiar but does not fix repeated errors.\\n\\nC) Incorrect: highlighting is passive and does not address the missed question type.\\n\\nD) Incorrect: waiting to quiz reduces chances to get feedback and improve."
     }}
   ]
 }}
