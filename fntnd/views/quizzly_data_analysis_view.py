@@ -180,8 +180,10 @@ def render_data_analysis_view() -> None:
     if not st.session_state.get(_SESSION_UNLOCK):
         st.caption("Admin only — enter password to view aggregate usage and estimated spend.")
         with st.form("quizzly_analytics_auth", clear_on_submit=False):
-            pw = st.text_input("Password", type="password", autocomplete="off")
-            submit = st.form_submit_button("Unlock", type="primary", width="stretch")
+            c1, c2, c3 = st.columns([3, 2, 3])
+            with c2:
+                pw = st.text_input("Password", type="password", autocomplete="off")
+                submit = st.form_submit_button("Unlock", type="primary", width="stretch")
         if submit:
             if (pw or "").strip() == _analytics_password():
                 st.session_state[_SESSION_UNLOCK] = True

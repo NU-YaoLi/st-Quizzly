@@ -48,7 +48,6 @@ try:
     from bknd.quizzly_question_vrf import (
         run_quiz_output_guard,
         validate_quiz_shape,
-        rebalance_correct_options_evenly,
         verify_quiz,
     )
 except Exception as _e:  # pragma: no cover
@@ -65,9 +64,6 @@ except Exception as _e:  # pragma: no cover
         return quiz
 
     def run_quiz_output_guard(quiz_data: dict) -> dict:  # type: ignore[no-redef]
-        return quiz_data
-
-    def rebalance_correct_options_evenly(quiz_data: dict) -> dict:  # type: ignore[no-redef]
         return quiz_data
 
 from quizzly_config import (
@@ -254,8 +250,8 @@ def main():
 
             # Always mount the uploader (stable key) so switching source mode does not drop uploads.
             uploaded_files = st.file_uploader(
-                "Upload files (PDF, DOCX, PPTX, TXT, PNG, JPG) — max 5",
-                type=["pdf", "docx", "pptx", "txt", "png", "jpg", "jpeg"],
+                "Upload files (PDF, DOCX, PPTX, PNG, JPG) — max 5",
+                type=["pdf", "docx", "pptx", "png", "jpg", "jpeg"],
                 accept_multiple_files=True,
                 key="quizzly_study_files",
                 disabled=not files_mode,
@@ -734,9 +730,6 @@ def main():
                 log_line("Running output safety guard...")
                 quiz_data = run_quiz_output_guard(quiz_data)
                 quiz_data = validate_quiz_shape(quiz_data, num_questions)
-                # Disabled: keep model-produced option ordering/labels intact.
-                # (User requested no answer-key rebalancing.)
-                # quiz_data = rebalance_correct_options_evenly(quiz_data)
 
                 report: dict | None = None
                 vrf_usage: dict = {}
