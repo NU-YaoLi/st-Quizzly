@@ -227,10 +227,10 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
       "difficulty": "Easy",
       "question_text": "Why is active recall generally preferred over passive reading as a study strategy?",
       "options": [
-        "A) It requires less mental effort.",
-        "B) It strengthens neural pathways through testing.",
-        "C) It allows students to read faster.",
-        "D) It eliminates the need for textbooks."
+        "It requires less mental effort.",
+        "It strengthens neural pathways through testing.",
+        "It allows students to read faster.",
+        "It eliminates the need for textbooks."
       ],
       "correct_option": "B",
       "explanation": "Active recall (self-testing) improves learning because retrieving information strengthens memory and understanding.\\n\\nOption A is incorrect because active recall typically requires more mental effort than passive review.\\n\\nOption C is incorrect because reading speed is not the main mechanism—retention and transfer are.\\n\\nOption D is incorrect because active recall does not eliminate the need for learning resources; it changes how you study them."
@@ -240,10 +240,10 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
       "difficulty": "Medium",
       "question_text": "Marcus spends three hours reading and highlighting but does not take any practice tests. What is the most likely outcome of this study strategy?",
       "options": [
-        "A) He will have deep, long-term retention of the dates and events.",
-        "B) He may suffer from the 'illusion of competence' and perform poorly on the actual exam.",
-        "C) He is utilizing the most effective pedagogical framework available.",
-        "D) He will avoid context window degradation."
+        "He will have deep, long-term retention of the dates and events.",
+        "He may suffer from the 'illusion of competence' and perform poorly on the actual exam.",
+        "He is utilizing the most effective pedagogical framework available.",
+        "He will avoid context window degradation."
       ],
       "correct_option": "B",
       "explanation": "Reading and highlighting can create an illusion of competence because it feels fluent, but without retrieval practice and feedback you often overestimate mastery and underperform on tests.\\n\\nOption A is incorrect because passive review alone is usually weaker for durable retention than retrieval practice.\\n\\nOption C is incorrect because the effective approach is typically to add practice testing and feedback loops, not rely only on highlighting.\\n\\nOption D is incorrect because context windows are an AI concept and do not explain human exam performance here."
@@ -253,10 +253,10 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
       "difficulty": "Hard",
       "question_text": "A student alternates between rereading notes and taking untimed practice quizzes but keeps missing the same type of question. Which change would most directly improve learning transfer, and why?",
       "options": [
-        "A) Add immediate feedback after each quiz attempt and focus on explaining why wrong options are wrong.",
-        "B) Increase rereading time because familiarity is the strongest predictor of exam performance.",
-        "C) Switch to highlighting only, since it reduces cognitive load and prevents confusion.",
-        "D) Avoid quizzes until the material feels easy, then test at the end."
+        "Add immediate feedback after each quiz attempt and focus on explaining why wrong options are wrong.",
+        "Increase rereading time because familiarity is the strongest predictor of exam performance.",
+        "Switch to highlighting only, since it reduces cognitive load and prevents confusion.",
+        "Avoid quizzes until the material feels easy, then test at the end."
       ],
       "correct_option": "A",
       "explanation": "Immediate feedback paired with retrieval practice helps correct misconceptions and strengthens the ability to apply knowledge in new contexts (transfer).\\n\\nOption B is incorrect because familiarity from rereading often overestimates mastery without improving recall under test conditions.\\n\\nOption C is incorrect because highlighting alone is a passive strategy and does not address repeated errors.\\n\\nOption D is incorrect because delaying testing reduces opportunities for corrective feedback and durable learning."

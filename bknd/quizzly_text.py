@@ -5,21 +5,29 @@ Intentionally kept dependency-free (no Streamlit, no LangChain) so UI modules
 can safely import these helpers without pulling in heavy backend dependencies.
 """
 
+import re
+
 
 def clean_option_text(s: str) -> str:
-    """Strip up to 3 repeated ``A) `` / ``B) `` / ``C) `` / ``D) `` prefixes.
+    """Strip up to 3 repeated option-letter prefixes.
 
-    Many model outputs already include ``"A) ..."`` inside the option string,
+    Many model outputs already include things like ``"A) ..."`` inside the option string,
     so when the UI also renders the letter we end up with ``"A) A) ..."``.
     Used by the error-notebook and current-quiz-mistakes views.
     """
     if not isinstance(s, str):
         return ""
     t = s.strip()
+    # Examples we want to normalize:
+    # - "A) foo", "A ) foo", "(A) foo", "[A] foo"
+    # - "A. foo", "A: foo", "A - foo", "A—foo", "A）foo"
+    # - repeated prefixes: "A) A) foo"
+    prefix = re.compile(r"^\s*[\(\[\{]?\s*([ABCD])\s*[\)\]\}]?\s*[\)\.\:\-\u2013\u2014\uFF09]\s*",
+                        re.IGNORECASE)
     for _ in range(3):
-        if len(t) >= 3 and t[0].upper() in "ABCD" and t[1] == ")" and t[2] == " ":
-            t = t[3:].lstrip()
-        else:
+        m = prefix.match(t)
+        if not m:
             break
+        t = t[m.end() :].lstrip()
     return t
 
