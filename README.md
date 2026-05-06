@@ -5,7 +5,7 @@ Quizzly is a Streamlit web app that turns **study materials** (uploaded files *o
 ## What it does
 
 - **Material sources (choose one)**
-  - **Upload files** (max **5**): `PDF`, `DOCX`, `PPTX`, `TXT`, `PNG`, `JPG/JPEG`
+  - **Upload files** (max **5**): `PDF`, `DOCX`, `PPTX`, `PNG`, `JPG/JPEG`
   - **Website links** (max **5**) with SSRF safety checks (blocks localhost / private IPs)
 - **Auto sizing + limits**
   - Total upload size limited to **≤ 10 MB**
@@ -35,7 +35,7 @@ Quizzly is a Streamlit web app that turns **study materials** (uploaded files *o
 
 ### Prerequisites
 
-- Python 3.10+ recommended
+- Python 3.14 recommended
 - An OpenAI API key
 
 ### Install

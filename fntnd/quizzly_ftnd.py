@@ -21,10 +21,13 @@ import uuid
 import streamlit as st
 from openai import OpenAIError
 
+from bknd.quizzly_material_sizing import (
+    total_pseudo_pages_for_upload_paths,
+    total_pseudo_pages_for_web_texts,
+)
 from bknd.quizzly_question_gnrt import (
     create_extraction_chain,
     create_generation_chain,
-    get_page_count,
     setup_api,
 )
 from bknd.quizzly_question_upldprcs import (
@@ -34,7 +37,6 @@ from bknd.quizzly_question_upldprcs import (
     fetch_website_text,
     image_to_pdf,
     pptx_to_pdf,
-    pseudo_pages_from_web_text,
 )
 from bknd.quizzly_rate_limit import (
     check_daily_generation_allowed,
@@ -360,7 +362,7 @@ def main():
             temp_dir = tempfile.gettempdir()
             processed_paths: list[str] = []
             cleanup_paths: list[str] = []
-            total_pages = 0
+            upload_paths_for_sizing: list[str] = []
             web_blocks: list[tuple[str, str]] = []
             web_fetch_errors: list[str] = []
             source_count = 0
@@ -435,12 +437,13 @@ def main():
                         new_path = temp_path
 
                     processed_paths.append(new_path)
-                    total_pages += get_page_count(new_path)
+                    upload_paths_for_sizing.append(temp_path)
 
+                total_material_pseudo_pages = total_pseudo_pages_for_upload_paths(upload_paths_for_sizing)
                 source_count = len(processed_paths)
                 max_questions = max(
                     MIN_QUESTIONS,
-                    min(MAX_QUESTIONS_CAP, total_pages // 2),
+                    min(MAX_QUESTIONS_CAP, total_material_pseudo_pages // 2),
                 )
 
             else:
@@ -467,9 +470,7 @@ def main():
                         st.error(msg)
 
                 source_count = len(web_blocks)
-                total_web_pages = sum(max(1, pseudo_pages_from_web_text(t)) for _, t in web_blocks)
-                if not web_blocks:
-                    total_web_pages = 0
+                total_web_pages = total_pseudo_pages_for_web_texts([t for _, t in web_blocks])
 
                 combined_web = "\n\n---\n\n".join(f"Source: {u}\n\n{t}" for u, t in web_blocks)
                 st.session_state["_web_text"] = combined_web
@@ -508,7 +509,10 @@ def main():
                 min_value=MIN_QUESTIONS,
                 max_value=max_questions,
                 value=MIN_QUESTIONS,
-                help="The max number of questions is auto-set from your material pages/2 to keep quiz quality high.",
+                help=(
+                    "The max is auto-set from material size (text-based pseudo-pages, same scale as "
+                    "website sources) divided by 2, capped to keep quiz quality high."
+                ),
             )
 
             scenario_pct = st.slider(
