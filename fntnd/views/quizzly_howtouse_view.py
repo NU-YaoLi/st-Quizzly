@@ -84,13 +84,14 @@ Tip: You can switch **Quiz Generation Mode**:
 
 ### 6) Send feedback (new)
 
-Use **💬 Feedback** in the sidebar to send:
+Open **💬 Feedback** in the sidebar to send bugs, ideas, or study-flow notes. Your quiz stays in this session — this page only saves what you submit.
 
-- Bugs (something broke)
-- Feature ideas
-- Quiz quality issues (e.g., wrong answer / unclear explanation)
+**Good feedback helps us fix things faster:**
 
-This page **does not change your quiz** — it only saves the message you submit. To prevent spam, feedback has a short cooldown between submissions.
+- Say what you were doing (upload vs links, rough question count).
+- For bad quiz items, quote a few words from the question or name the topic.
+
+To prevent spam, feedback has a short cooldown between submissions.
         """.format(min_q=MIN_QUESTIONS, cap=MAX_QUESTIONS_CAP)
     )
 

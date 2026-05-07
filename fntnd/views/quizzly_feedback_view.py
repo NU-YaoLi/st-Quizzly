@@ -10,7 +10,7 @@ import streamlit as st
 
 from bknd.quizzly_feedback_log import submit_user_feedback
 
-_FEEDBACK_COOLDOWN_SEC = 45.0
+_FEEDBACK_COOLDOWN_SEC = 30.0
 _COOLDOWN_KEY = "_quizzly_feedback_cooldown_until"
 
 
