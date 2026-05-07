@@ -203,7 +203,9 @@ Analyze the provided user text/document and generate a multiple-choice quiz. The
    - Keep Hard question stems concise (target: ≤ 40 words unless absolutely necessary).
 14. **Answer Key Balance (Important):** Distribute the correct answers evenly across A/B/C/D for the *whole quiz*.
    - For N questions, the counts of A/B/C/D must be as even as possible (difference between any two letters is at most 1).
-   - Do this by designing the options so the correct answer naturally lands on different letters; do NOT game this with weird wording.
+   - Avoid predictable patterns like ABCDABCD... The answer key order must not be trivially guessable.
+   - IMPORTANT: Do NOT place correct answers in a simple repeating cycle. Choose the correct-option letters in a *shuffled, non-repeating-feeling* order while still meeting the global balance requirement.
+   - Example of BAD pattern: ABCDABCDABCD. Example of OK: B D A C A D B C ... (balanced but not cyclical).
 15. **Ordering:** You MUST present the questions strictly in ascending order of difficulty (Easy -> Medium -> Hard). Assign the correct "difficulty" label to each.
 16. **Explanations (More Pedagogical, Less Fluff):**
    - The explanation MUST follow this structure:
