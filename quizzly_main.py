@@ -239,9 +239,31 @@ _load_module(
 # Then load the main frontend module by path.
 _reinforce_quizzly_config()
 _load_module("fntnd.quizzly_ftnd", _root / "fntnd" / "quizzly_ftnd.py")
-if not hasattr(sys.modules.get("fntnd.quizzly_ftnd"), "main"):
-    raise ImportError("Failed to load fntnd.quizzly_ftnd.main (module did not finish initializing).")
-main = sys.modules["fntnd.quizzly_ftnd"].main
+_ftnd_mod = sys.modules.get("fntnd.quizzly_ftnd")
+if _ftnd_mod is None or not hasattr(_ftnd_mod, "main"):
+    # Streamlit Cloud + Python 3.14 can intermittently land a module object in sys.modules
+    # with incomplete bindings (similar to the quizzly_config issue). Retry once with a
+    # clean slate so the Cloud logs show a consistent failure if it persists.
+    sys.modules.pop("fntnd.quizzly_ftnd", None)
+    importlib.invalidate_caches()
+    _reinforce_quizzly_config()
+    _load_module("fntnd.quizzly_ftnd", _root / "fntnd" / "quizzly_ftnd.py")
+    _ftnd_mod = sys.modules.get("fntnd.quizzly_ftnd")
+
+if _ftnd_mod is None or not hasattr(_ftnd_mod, "main"):
+    mod_file = getattr(_ftnd_mod, "__file__", "?") if _ftnd_mod else "?"
+    attrs = []
+    try:
+        if _ftnd_mod is not None:
+            attrs = sorted([a for a in dir(_ftnd_mod) if not a.startswith("_")])[:60]
+    except Exception:
+        attrs = []
+    raise ImportError(
+        "Failed to load fntnd.quizzly_ftnd.main (module did not finish initializing). "
+        f"module_file={mod_file} exported={attrs}"
+    )
+
+main = _ftnd_mod.main  # type: ignore[assignment]
 
 
 if __name__ == "__main__":
