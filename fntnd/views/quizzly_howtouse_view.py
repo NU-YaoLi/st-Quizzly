@@ -45,7 +45,7 @@ come back after the reset—or focus on the quiz you already generated.
 ### 1) Choose your material source (one mode at a time)
 
 - **Upload files** (best for slides/notes)
-  - Supported: **PDF, DOCX, PPTX, TXT, PNG, JPG/JPEG**
+  - Supported: **PDF, DOCX, PPTX, PNG, JPG/JPEG**
   - You can upload up to **5** files at once.
 - **Website links** (best for articles)
   - You can add up to **5** URLs.
@@ -81,6 +81,16 @@ Tip: You can switch **Quiz Generation Mode**:
 - Incorrect questions are added to:
   - **Mistakes Review** (right rail, current quiz)
   - **Error Notebook** (all-time history for this client session)
+
+### 6) Send feedback (new)
+
+Use **💬 Feedback** in the sidebar to send:
+
+- Bugs (something broke)
+- Feature ideas
+- Quiz quality issues (e.g., wrong answer / unclear explanation)
+
+This page **does not change your quiz** — it only saves the message you submit. To prevent spam, feedback has a short cooldown between submissions.
         """.format(min_q=MIN_QUESTIONS, cap=MAX_QUESTIONS_CAP)
     )
 
