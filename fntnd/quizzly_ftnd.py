@@ -19,7 +19,15 @@ import traceback
 import uuid
 
 import streamlit as st
-from openai import OpenAIError
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    AuthenticationError,
+    BadRequestError,
+    OpenAIError,
+    PermissionDeniedError,
+    RateLimitError,
+)
 
 from bknd.quizzly_material_sizing import (
     total_pseudo_pages_for_upload_paths,
@@ -939,9 +947,93 @@ def main():
                     pass
                 st.rerun()
 
-            except OpenAIError as e:
+            except RateLimitError as e:
                 st.error(
-                    "There was a problem communicating with OpenAI. Check your API key, billing limits, or network connection."
+                    "**Rate limit error.** OpenAI throttled this request — likely the per-minute "
+                    "tokens (TPM) cap or your monthly usage quota was hit. "
+                    "Try again in a minute, lower the question count, use a smaller document, "
+                    "or switch to **Fast** mode (one LLM call instead of three)."
+                )
+                if debug_enabled:
+                    st.info(f"**Details:** {str(e)}")
+                try:
+                    live_status.update(label="Workflow failed — rate limited.", state="error", expanded=False)
+                except Exception:
+                    pass
+
+            except BadRequestError as e:
+                msg = str(e).lower()
+                if "context length" in msg or "maximum context" in msg or "too many tokens" in msg:
+                    headline = (
+                        "**Bad request error — document too large for the model's context window.** "
+                        "Try a shorter PDF, fewer pages, or split the upload into smaller files."
+                    )
+                else:
+                    headline = (
+                        "**Bad request error.** OpenAI rejected the request payload "
+                        "(invalid file, unsupported content, or malformed parameters)."
+                    )
+                st.error(headline)
+                if debug_enabled:
+                    st.info(f"**Details:** {str(e)}")
+                try:
+                    live_status.update(label="Workflow failed — bad request.", state="error", expanded=False)
+                except Exception:
+                    pass
+
+            except APITimeoutError as e:
+                st.error(
+                    "**Request timeout.** OpenAI took too long to respond — usually caused by "
+                    "very large inputs or a slow upstream. Try a smaller document or rerun."
+                )
+                if debug_enabled:
+                    st.info(f"**Details:** {str(e)}")
+                try:
+                    live_status.update(label="Workflow failed — timeout.", state="error", expanded=False)
+                except Exception:
+                    pass
+
+            except APIConnectionError as e:
+                st.error(
+                    "**Connection error.** Could not reach OpenAI. Check your network "
+                    "connection, VPN, or firewall and try again."
+                )
+                if debug_enabled:
+                    st.info(f"**Details:** {str(e)}")
+                try:
+                    live_status.update(label="Workflow failed — connection error.", state="error", expanded=False)
+                except Exception:
+                    pass
+
+            except AuthenticationError as e:
+                st.error(
+                    "**Authentication error.** Your OpenAI API key is missing, invalid, "
+                    "or revoked. Update `OPENAI_API_KEY` in your environment / Streamlit secrets."
+                )
+                if debug_enabled:
+                    st.info(f"**Details:** {str(e)}")
+                try:
+                    live_status.update(label="Workflow failed — auth error.", state="error", expanded=False)
+                except Exception:
+                    pass
+
+            except PermissionDeniedError as e:
+                st.error(
+                    "**Permission denied.** Your API key does not have access to this model "
+                    "or resource. Check model access on the OpenAI dashboard."
+                )
+                if debug_enabled:
+                    st.info(f"**Details:** {str(e)}")
+                try:
+                    live_status.update(label="Workflow failed — permission denied.", state="error", expanded=False)
+                except Exception:
+                    pass
+
+            except OpenAIError as e:
+                error_type = type(e).__name__
+                st.error(
+                    f"**OpenAI error ({error_type}).** There was a problem communicating with OpenAI. "
+                    "Check your API key, billing limits, or network connection."
                 )
                 if debug_enabled:
                     st.info(f"**Details:** {str(e)}")
