@@ -5,8 +5,6 @@ Admin-style usage dashboard: users, per-quiz detail, and cost (UTC).
 # NOTE: deliberately no ``from __future__ import annotations`` — see
 # ``bknd/quizzly_usage_log.py`` for the Python 3.14 rationale.
 
-import hmac
-import os
 from collections import defaultdict
 from datetime import date, datetime, timezone
 
@@ -47,32 +45,12 @@ def _da_table_height_px(num_rows: int) -> int:
 
 
 def _analytics_password() -> str:
-    """
-    Resolve the analytics admin password from a secure source.
-
-    Lookup order:
-      1. ``st.secrets["QUIZZLY_ANALYTICS_PASSWORD"]`` (Streamlit Cloud / .streamlit/secrets.toml)
-      2. ``os.environ["QUIZZLY_ANALYTICS_PASSWORD"]`` (self-hosted deployments)
-
-    Returns an empty string if neither is configured. The caller MUST treat an
-    empty string as "no admin access available" rather than silently unlocking.
-    """
-    try:
-        configured = (st.secrets.get("QUIZZLY_ANALYTICS_PASSWORD") or "").strip()
-    except Exception:
-        # st.secrets raises if no secrets file is present at all.
-        configured = ""
-    if not configured:
-        configured = (os.environ.get("QUIZZLY_ANALYTICS_PASSWORD") or "").strip()
-    return configured
-
-
-def _analytics_password_matches(submitted: str) -> bool:
-    """Constant-time comparison; refuses to match when no password is configured."""
-    expected = _analytics_password()
-    if not expected:
-        return False
-    return hmac.compare_digest(expected, (submitted or "").strip())
+    # Hardcoded test password. This view exposes only aggregate usage metrics
+    # for an internal test deployment, so a long-lived rotating secret is
+    # overkill here. Change this value to rotate access; for a real production
+    # deployment, switch to ``st.secrets["QUIZZLY_ANALYTICS_PASSWORD"]`` so the
+    # value is never committed to source control.
+    return "1404"
 
 
 @st.cache_data(ttl=90, show_spinner="Loading daily aggregates…")
@@ -205,13 +183,6 @@ def render_data_analysis_view() -> None:
     st.title("Quizzly Data Analysis")
 
     if not st.session_state.get(_SESSION_UNLOCK):
-        if not _analytics_password():
-            st.error(
-                "Analytics admin access is not configured for this deployment. "
-                "Set `QUIZZLY_ANALYTICS_PASSWORD` in Streamlit secrets (or as an "
-                "environment variable) to enable this page."
-            )
-            return
         st.caption("Admin only — enter password to view aggregate usage and estimated spend.")
         with st.form("quizzly_analytics_auth", clear_on_submit=False):
             c1, c2, c3 = st.columns([3, 2, 3])
@@ -219,7 +190,7 @@ def render_data_analysis_view() -> None:
                 pw = st.text_input("Password", type="password", autocomplete="off")
                 submit = st.form_submit_button("Unlock", type="primary", width="stretch")
         if submit:
-            if _analytics_password_matches(pw):
+            if (pw or "").strip() == _analytics_password():
                 st.session_state[_SESSION_UNLOCK] = True
                 st.rerun()
             else:
