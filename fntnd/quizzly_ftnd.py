@@ -11,7 +11,6 @@ admin analytics view.
 import hashlib
 import importlib
 import json
-import mimetypes
 import os
 import tempfile
 import time
@@ -33,11 +32,13 @@ from bknd.quizzly_material_sizing import (
     total_pseudo_pages_for_upload_paths,
     total_pseudo_pages_for_web_texts,
 )
+from bknd.quizzly_pdf_content import (
+    TooLargeError,
+    build_content_parts_for_files,
+)
 from bknd.quizzly_question_gnrt import (
     create_extraction_chain,
     create_generation_chain,
-    get_page_count,
-    setup_api,
 )
 from bknd.quizzly_question_upldprcs import (
     PENDING_REMOVE_URL_INDEX,
@@ -684,46 +685,39 @@ def main():
                 except Exception:
                     pass
 
-            client = None
-            oai_file_ids: list[str] = []
+            material_parts: list[dict] = []
             try:
-                client = setup_api()
-
-                log_line("Uploading to secure environment...")
-                for fp in st.session_state.get("current_paths") or []:
-                    mime_type, _ = mimetypes.guess_type(fp)
-                    if mime_type is None:
-                        mime_type = "application/octet-stream"
-
-                    # Pre-flight diagnostics — recorded BEFORE the OpenAI call so we can
-                    # tell file-size / page-cap issues from server-side rejections.
+                # Adaptive PDF pipeline: classify each page locally, pick the
+                # cheapest sufficient representation, and degrade to fit the
+                # input-token budget. No more uploading the whole file to OpenAI
+                # (which silently rasterizes every page into ~25k vision tokens).
+                paths = st.session_state.get("current_paths") or []
+                if paths:
+                    log_line("Analyzing PDF…")
                     try:
-                        size_bytes = os.path.getsize(fp)
-                    except Exception:
-                        size_bytes = -1
-                    try:
-                        page_count = get_page_count(fp)
-                    except Exception:
-                        page_count = -1
-                    size_mb = size_bytes / (1024 * 1024) if size_bytes >= 0 else -1
-                    log_line(
-                        f"Pre-flight: {os.path.basename(fp)} — "
-                        f"{size_mb:.2f} MB, {page_count} page(s), mime={mime_type}"
-                    )
+                        material_parts, est_tokens, plans = build_content_parts_for_files(paths)
+                    except TooLargeError as e:
+                        raise ValueError(str(e)) from e
 
-                    with open(fp, "rb") as f:
-                        try:
-                            oai_file = client.files.create(
-                                file=(os.path.basename(fp), f, mime_type),
-                                purpose="user_data",
-                            )
-                        except Exception as e:
-                            log_line(f"Failed to upload {os.path.basename(fp)}: {e}")
-                            continue
+                    # One concise summary line per file for the workflow card.
+                    for plan in plans:
+                        strat_counts: dict[str, int] = {}
+                        for pp in plan.page_plans:
+                            strat_counts[pp.strategy] = strat_counts.get(pp.strategy, 0) + 1
+                        summary = ", ".join(
+                            f"{n} {label}" for label, n in strat_counts.items() if n
+                        )
+                        log_line(
+                            f"{os.path.basename(plan.file_path)}: "
+                            f"{len(plan.page_plans)} page(s) → {summary} "
+                            f"(~{plan.estimated_tokens:,} tokens)"
+                        )
+                        for note in plan.notes:
+                            log_line(f"  {note}")
+                    log_line(f"Materials prepared: ~{est_tokens:,} input tokens (budget OK).")
 
-                    oai_file_ids.append(oai_file.id)
-                if not oai_file_ids and not st.session_state.get("_web_text", ""):
-                    raise ValueError("No materials were uploaded successfully.")
+                if not material_parts and not st.session_state.get("_web_text", ""):
+                    raise ValueError("No materials were prepared successfully.")
 
                 concepts: list[str] = []
                 ext_usage: dict = {}
@@ -735,7 +729,7 @@ def main():
                     extractor = create_extraction_chain()
                     concepts_resp, ext_usage = extractor(
                         {
-                            "file_ids": oai_file_ids,
+                            "material_parts": material_parts,
                             "web_context": st.session_state.get("_web_text", ""),
                         }
                     )
@@ -750,7 +744,7 @@ def main():
                 generator = create_generation_chain(num_questions, scenario_pct=scenario_pct)
                 quiz_data, gen_usage = generator(
                     {
-                        "file_ids": oai_file_ids,
+                        "material_parts": material_parts,
                         "concepts_list": "" if fast_mode else ", ".join(concepts),
                         "web_context": st.session_state.get("_web_text", ""),
                     }

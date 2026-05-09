@@ -20,7 +20,7 @@ SUPABASE_URL = "https://udbxyrssdjndmvuakhgb.supabase.co"
 # Model configuration
 # -------------------
 # Single source of truth for the model used across all backend steps.
-QUIZZLY_MODEL = "gpt-5.4-mini"
+QUIZZLY_MODEL = "gpt-5-mini"
 
 # Website sizing (heuristic)
 WEB_CHARS_PER_PAGE = 2500
@@ -28,6 +28,39 @@ WEB_TEXT_PER_URL_CAP = 12000
 
 # Hard cap to avoid extremely large generations
 MAX_QUESTIONS_CAP = 50
+
+# -------------------------------
+# Adaptive PDF content pipeline
+# -------------------------------
+# Per-call input-token budget. Stays below the model's 272k cap with headroom for
+# the system prompt and reasoning output. Used by the pre-flight planner.
+INPUT_TOKEN_BUDGET_PER_CALL = 200_000
+
+# Per-page text-density classification (chars of extractable text per PDF page).
+# >= RICH      → text-only (cheapest, no image rendering)
+# < SPARSE     → vision-needed (rendered as low-detail image)
+# in between   → mixed (text + low-detail image)
+PDF_TEXT_RICH_THRESHOLD = 1000
+PDF_TEXT_SPARSE_THRESHOLD = 200
+
+# Render DPI used when the planner decides a page needs to be sent as an image.
+# - LOW: ~85 vision tokens per page (model still reads big text & shapes).
+# - HIGH: ~25k vision tokens per page (used sparingly for chart-critical pages).
+PDF_RENDER_DPI_LOW = 110
+PDF_RENDER_DPI_HIGH = 200
+
+# Hard cap on pages allowed to use HIGH detail across one request, to keep the
+# total token cost predictable even on chart-heavy textbooks.
+MAX_HIGH_DETAIL_PAGES = 4
+
+# Heuristic chars-per-token ratio for English text. Used by the planner only;
+# the actual OpenAI tokenizer is not invoked (we cannot afford ~1s of tiktoken
+# overhead on the UI thread). 4.0 is the standard rule of thumb.
+CHARS_PER_TOKEN = 4.0
+
+# Vision-token estimates used by the planner.
+VISION_TOKENS_LOW_DETAIL = 85
+VISION_TOKENS_HIGH_DETAIL = 25_000
 
 # Duplicate detection for uploaded files (fingerprint first N bytes + size)
 FILE_FINGERPRINT_BYTES = 256 * 1024

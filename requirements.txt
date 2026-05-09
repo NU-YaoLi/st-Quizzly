@@ -1,5 +1,6 @@
 streamlit>=1.45
 PyPDF2
+PyMuPDF
 openai
 langchain-openai
 langchain-core
