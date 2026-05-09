@@ -408,7 +408,13 @@ def main():
                     generate_btn = False
                     # Skip further file processing
                     st.stop()
-                seen_fps = set()
+
+                # Compute a cheap fingerprint of the upload set. If it matches the
+                # cache, we skip re-writing the files, re-converting DOCX/PPTX/IMG,
+                # and (most importantly) re-running PyPDF2 page counting — the
+                # ~1.5s/40-page culprit that made every sidebar tweak feel laggy.
+                fp_items: list[tuple[str, int, str]] = []
+                seen_fps: set[tuple[str, int, str]] = set()
                 unique_uploads = []
                 dup_notes = []
                 for uf in uploaded_files:
@@ -422,73 +428,139 @@ def main():
                         continue
                     seen_fps.add(fp)
                     unique_uploads.append(uf)
-                if dup_notes:
-                    st.warning("Duplicate file(s) detected and will be ignored: " + ", ".join(dup_notes))
+                    fp_items.append(fp)
+                upload_fingerprint = tuple(sorted(fp_items))
 
-                for uf in unique_uploads:
-                    safe_name = os.path.basename(uf.name) or "upload"
-                    temp_path = os.path.join(temp_dir, f"{uuid.uuid4().hex}_{safe_name}")
-                    with open(temp_path, "wb") as f:
-                        f.write(uf.getbuffer())
-                    cleanup_paths.append(temp_path)
-
-                    ext = os.path.splitext(temp_path)[1].lower()
-
-                    if ext == ".docx":
-                        new_path = docx_to_pdf(temp_path)
-                        cleanup_paths.append(new_path)
-                    elif ext == ".pptx":
-                        new_path = pptx_to_pdf(temp_path)
-                        cleanup_paths.append(new_path)
-                    elif ext in [".png", ".jpg", ".jpeg"]:
-                        new_path = image_to_pdf(temp_path)
-                        cleanup_paths.append(new_path)
-                    else:
-                        new_path = temp_path
-
-                    processed_paths.append(new_path)
-                    upload_paths_for_sizing.append(temp_path)
-
-                total_material_pseudo_pages = total_pseudo_pages_for_upload_paths(upload_paths_for_sizing)
-                source_count = len(processed_paths)
-                max_questions = max(
-                    MIN_QUESTIONS,
-                    min(MAX_QUESTIONS_CAP, total_material_pseudo_pages // 2),
+                cached = st.session_state.get("_upload_cache")
+                cache_hit = (
+                    isinstance(cached, dict)
+                    and cached.get("fingerprint") == upload_fingerprint
+                    and all(
+                        isinstance(p, str) and os.path.exists(p)
+                        for p in cached.get("processed_paths") or []
+                    )
+                    and all(
+                        isinstance(p, str) and os.path.exists(p)
+                        for p in cached.get("cleanup_paths") or []
+                    )
                 )
+
+                if cache_hit:
+                    processed_paths = list(cached["processed_paths"])
+                    cleanup_paths = list(cached["cleanup_paths"])
+                    total_material_pseudo_pages = cached["total_material_pseudo_pages"]
+                    source_count = cached["source_count"]
+                    max_questions = cached["max_questions"]
+                    # Re-emit dup warnings only if the fingerprint actually changed;
+                    # silent on subsequent reruns of the same upload set.
+                else:
+                    if dup_notes:
+                        st.warning(
+                            "Duplicate file(s) detected and will be ignored: "
+                            + ", ".join(dup_notes)
+                        )
+
+                    for uf in unique_uploads:
+                        safe_name = os.path.basename(uf.name) or "upload"
+                        temp_path = os.path.join(temp_dir, f"{uuid.uuid4().hex}_{safe_name}")
+                        with open(temp_path, "wb") as f:
+                            f.write(uf.getbuffer())
+                        cleanup_paths.append(temp_path)
+
+                        ext = os.path.splitext(temp_path)[1].lower()
+
+                        if ext == ".docx":
+                            new_path = docx_to_pdf(temp_path)
+                            cleanup_paths.append(new_path)
+                        elif ext == ".pptx":
+                            new_path = pptx_to_pdf(temp_path)
+                            cleanup_paths.append(new_path)
+                        elif ext in [".png", ".jpg", ".jpeg"]:
+                            new_path = image_to_pdf(temp_path)
+                            cleanup_paths.append(new_path)
+                        else:
+                            new_path = temp_path
+
+                        processed_paths.append(new_path)
+                        upload_paths_for_sizing.append(temp_path)
+
+                    total_material_pseudo_pages = total_pseudo_pages_for_upload_paths(
+                        upload_paths_for_sizing
+                    )
+                    source_count = len(processed_paths)
+                    max_questions = max(
+                        MIN_QUESTIONS,
+                        min(MAX_QUESTIONS_CAP, total_material_pseudo_pages // 2),
+                    )
+
+                    st.session_state["_upload_cache"] = {
+                        "fingerprint": upload_fingerprint,
+                        "processed_paths": list(processed_paths),
+                        "cleanup_paths": list(cleanup_paths),
+                        "total_material_pseudo_pages": total_material_pseudo_pages,
+                        "source_count": source_count,
+                        "max_questions": max_questions,
+                    }
 
             else:
                 st.session_state["current_paths"] = []
-                for url in website_urls:
-                    try:
-                        ok, chunk, reason = _cached_fetch_website_text(url)
-                        if ok and chunk:
-                            web_blocks.append((url, chunk))
-                        else:
-                            if reason in {"blocked_localhost", "blocked_private_ip", "invalid_scheme"}:
-                                web_fetch_errors.append(f"{url}: blocked for safety ({reason}).")
-                            elif reason == "dns_failed":
-                                web_fetch_errors.append(f"{url}: DNS lookup failed.")
-                            elif reason == "request_failed":
-                                web_fetch_errors.append(f"{url}: request failed (timeout/blocked).")
-                            else:
-                                web_fetch_errors.append(f"{url}: too little readable text.")
-                    except Exception as e:
-                        web_fetch_errors.append(f"{url}: {e}")
-
-                if web_fetch_errors:
-                    for msg in web_fetch_errors:
-                        st.error(msg)
-
-                source_count = len(web_blocks)
-                total_web_pages = total_pseudo_pages_for_web_texts([t for _, t in web_blocks])
-
-                combined_web = "\n\n---\n\n".join(f"Source: {u}\n\n{t}" for u, t in web_blocks)
-                st.session_state["_web_text"] = combined_web
-
-                max_questions = max(
-                    MIN_QUESTIONS,
-                    min(MAX_QUESTIONS_CAP, total_web_pages // 2),
+                # Fingerprint = the (deduped, normalized) URL set. _cached_fetch_website_text
+                # caches per-URL text for 600s already, so the only repeat work
+                # left is the join + page sizing. Cache that too for consistency.
+                web_fingerprint = tuple(sorted(u.strip().lower().rstrip("/") for u in website_urls))
+                web_cached = st.session_state.get("_web_cache")
+                web_cache_hit = (
+                    isinstance(web_cached, dict)
+                    and web_cached.get("fingerprint") == web_fingerprint
                 )
+
+                if web_cache_hit:
+                    web_blocks = list(web_cached["web_blocks"])
+                    combined_web = web_cached["combined_web"]
+                    total_web_pages = web_cached["total_web_pages"]
+                    max_questions = web_cached["max_questions"]
+                    source_count = len(web_blocks)
+                    st.session_state["_web_text"] = combined_web
+                else:
+                    for url in website_urls:
+                        try:
+                            ok, chunk, reason = _cached_fetch_website_text(url)
+                            if ok and chunk:
+                                web_blocks.append((url, chunk))
+                            else:
+                                if reason in {"blocked_localhost", "blocked_private_ip", "invalid_scheme"}:
+                                    web_fetch_errors.append(f"{url}: blocked for safety ({reason}).")
+                                elif reason == "dns_failed":
+                                    web_fetch_errors.append(f"{url}: DNS lookup failed.")
+                                elif reason == "request_failed":
+                                    web_fetch_errors.append(f"{url}: request failed (timeout/blocked).")
+                                else:
+                                    web_fetch_errors.append(f"{url}: too little readable text.")
+                        except Exception as e:
+                            web_fetch_errors.append(f"{url}: {e}")
+
+                    if web_fetch_errors:
+                        for msg in web_fetch_errors:
+                            st.error(msg)
+
+                    source_count = len(web_blocks)
+                    total_web_pages = total_pseudo_pages_for_web_texts([t for _, t in web_blocks])
+
+                    combined_web = "\n\n---\n\n".join(f"Source: {u}\n\n{t}" for u, t in web_blocks)
+                    st.session_state["_web_text"] = combined_web
+
+                    max_questions = max(
+                        MIN_QUESTIONS,
+                        min(MAX_QUESTIONS_CAP, total_web_pages // 2),
+                    )
+
+                    st.session_state["_web_cache"] = {
+                        "fingerprint": web_fingerprint,
+                        "web_blocks": list(web_blocks),
+                        "combined_web": combined_web,
+                        "total_web_pages": total_web_pages,
+                        "max_questions": max_questions,
+                    }
 
             st.session_state["current_paths"] = processed_paths
             st.session_state["cleanup_paths"] = cleanup_paths
@@ -1105,14 +1177,9 @@ def main():
                     except Exception:
                         pass
                 st.session_state["cleanup_paths"] = []
-                try:
-                    for fid in oai_file_ids:
-                        try:
-                            client.files.delete(fid)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+                # Local upload cache references temp paths that have just been
+                # deleted; invalidate so the next rerun re-prepares materials.
+                st.session_state.pop("_upload_cache", None)
 
         status_label = st.session_state.get("workflow_status_label")
         if status_label:
