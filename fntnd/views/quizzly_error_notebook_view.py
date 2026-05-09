@@ -12,12 +12,19 @@ from fntnd.quizzly_state import load_error_history, save_error_history
 from quizzly_config import ANSWER_LETTERS
 
 
-def render_error_notebook_view(*, client_id: str, quiz_id: str) -> None:
+def render_error_notebook_view(
+    *, client_id: str, quiz_id: str, csig: str | None = None
+) -> None:
     st.title("Error Notebook")
     st.caption("All-time record of mistakes across quizzes for this client session.")
 
-    history = st.session_state.get("_error_notebook_history") or load_error_history(client_id)
-    st.session_state["_error_notebook_history"] = history
+    # Explicit None check, not falsy: an empty list is a valid "history is empty"
+    # state and must not trigger another disk read on every rerun. Also pass the
+    # current csig so signed-state mode does not silently return [] on mismatch.
+    history = st.session_state.get("_error_notebook_history")
+    if history is None:
+        history = load_error_history(client_id, csig=csig)
+        st.session_state["_error_notebook_history"] = history
 
     col_a, col_b = st.columns([1, 1], gap="small")
     with col_a:

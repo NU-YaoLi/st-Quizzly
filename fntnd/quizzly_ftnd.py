@@ -130,6 +130,26 @@ def _cached_fetch_website_text(url: str) -> tuple[bool, str, str]:
     return fetch_website_text(url)
 
 
+def _inject_css_once(key: str, css: str) -> None:
+    """Inject a `<style>` block at most once per Streamlit session.
+
+    Streamlit reruns the entire script on every widget interaction, so
+    unconditional ``st.markdown(<style>..., unsafe_allow_html=True)`` calls
+    re-emit the same CSS dozens of times per minute and bloat the rendered
+    DOM. Tracking the injected keys in ``st.session_state`` keeps the styles
+    in place after the first render without re-emitting them on each rerun.
+    """
+    flag_key = "_css_injected_keys"
+    injected = st.session_state.get(flag_key)
+    if not isinstance(injected, set):
+        injected = set()
+        st.session_state[flag_key] = injected
+    if key in injected:
+        return
+    st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
+    injected.add(key)
+
+
 def main():
     client_id = get_or_create_client_id()
     qp = get_query_params()
@@ -168,11 +188,13 @@ def main():
             st.session_state["workflow_status_label"] = hydrated.get("workflow_status_label")
             st.session_state["workflow_status_lines"] = hydrated.get("workflow_status_lines") or []
 
-    # Load all-time error notebook history once per session/client.
-    # (If history is empty, avoid re-reading from disk on every rerun.)
-    if not st.session_state.get("_error_history_loaded"):
+    # Load all-time error notebook history once per (session, client_id) pair.
+    # Keying by client_id (not just a boolean) is important: if ?client= changes
+    # mid-session, the previously loaded notebook would otherwise stay shown
+    # under the new client_id — a privacy / correctness issue.
+    if st.session_state.get("_error_history_client") != client_id:
         st.session_state["_error_notebook_history"] = load_error_history(client_id, csig=csig)
-        st.session_state["_error_history_loaded"] = True
+        st.session_state["_error_history_client"] = client_id
 
     # API Key Check via Streamlit Secrets (avoid KeyError if secrets layout differs)
     try:
@@ -274,9 +296,9 @@ def main():
             website_urls: list[str] = []
 
         if not files_mode:
-            st.markdown(
+            _inject_css_once(
+                "sidebar-website-mode",
                 """
-                <style>
                 /* Hide the file uploader UI in Website links mode (keep it mounted so state persists). */
                 section[data-testid="stSidebar"] [class*="st-key-quizzly_study_files"] {
                     display: none !important;
@@ -300,9 +322,7 @@ def main():
                     margin: 0 !important;
                     padding: 0 !important;
                 }
-                </style>
                 """,
-                unsafe_allow_html=True,
             )
             st.caption(
                 "Use **+** to add a row and **✕** to remove it (at least one row stays). "
@@ -454,6 +474,18 @@ def main():
                     # Re-emit dup warnings only if the fingerprint actually changed;
                     # silent on subsequent reruns of the same upload set.
                 else:
+                    # Fingerprint changed (or no prior cache): the previous cache's
+                    # temp files are now orphaned on disk. Delete them before we
+                    # write the new ones so /tmp does not grow unboundedly on
+                    # long-running Streamlit Cloud workers.
+                    if isinstance(cached, dict):
+                        for stale in cached.get("cleanup_paths") or []:
+                            try:
+                                if isinstance(stale, str) and os.path.exists(stale):
+                                    os.remove(stale)
+                            except Exception:
+                                pass
+
                     if dup_notes:
                         st.warning(
                             "Duplicate file(s) detected and will be ignored: "
@@ -643,7 +675,7 @@ def main():
     if view == "errors":
         fn, verr = _lazy_view_func("fntnd.views.quizzly_error_notebook_view", "render_error_notebook_view")
         if fn:
-            fn(client_id=client_id, quiz_id=quiz_id)
+            fn(client_id=client_id, quiz_id=quiz_id, csig=csig)
         else:
             st.error("Could not load the Error Notebook view.")
             if verr:
@@ -672,17 +704,15 @@ def main():
         return
 
     # --- Main Area: Processing & Display ---
-    st.markdown(
+    _inject_css_once(
+        "main-error-notebook-rail",
         """
-        <style>
         /* Keyed Error Notebook container fills the right rail height */
         section[data-testid="stMainBlockContainer"] [class*="st-key-quizzly_error_notebook"] {
             min-height: calc(100vh - 9.5rem) !important;
             box-sizing: border-box;
         }
-        </style>
         """,
-        unsafe_allow_html=True,
     )
     # Give main content most of the width; keep a narrow right rail.
     col1, col2 = st.columns([3, 1], gap="medium", vertical_alignment="top")
@@ -792,6 +822,7 @@ def main():
                     raise ValueError("No materials were prepared successfully.")
 
                 concepts: list[str] = []
+                study_digest = ""
                 ext_usage: dict = {}
                 if fast_mode:
                     log_line("Fast mode: skipping concept extraction…")
@@ -807,6 +838,7 @@ def main():
                     )
                     st.session_state["workflow_token_usage_extraction"] = ext_usage
                     concepts = concepts_resp.get("concepts") or []
+                    study_digest = (concepts_resp.get("digest") or "").strip()
                     if not concepts:
                         raise ValueError(
                             "Failed to extract concepts from the provided materials (website may be unreadable)."
@@ -814,10 +846,15 @@ def main():
 
                 log_line(f"Generating {num_questions} questions...")
                 generator = create_generation_chain(num_questions, scenario_pct=scenario_pct)
+                # In Full mode we ship the compact extraction digest instead of
+                # the full multimodal materials to avoid duplicate token cost.
+                # Fast mode still needs the materials directly because there is
+                # no extraction pass to summarize them.
                 quiz_data, gen_usage = generator(
                     {
-                        "material_parts": material_parts,
+                        "material_parts": material_parts if fast_mode else [],
                         "concepts_list": "" if fast_mode else ", ".join(concepts),
+                        "study_digest": "" if fast_mode else study_digest,
                         "web_context": st.session_state.get("_web_text", ""),
                     }
                 )

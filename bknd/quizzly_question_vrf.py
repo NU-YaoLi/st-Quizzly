@@ -168,6 +168,40 @@ def code_based_grading(quiz_data, expected_count):
     return score / 4.0, feedback
 
 
+def _compact_quiz_for_grading(quiz_data) -> dict:
+    """
+    Strip fields the judge does not need (per-option explanations) to keep the
+    grading payload small. Explanations can be ~500-1500 chars per question, so
+    a 50-question quiz drops by tens of thousands of input tokens with no loss
+    of grading signal — fidelity / pedagogical scoring uses only question_text,
+    options, and correct_option.
+    """
+    if not isinstance(quiz_data, dict):
+        return quiz_data
+    questions = quiz_data.get("questions")
+    if not isinstance(questions, list):
+        return quiz_data
+
+    compact_questions = []
+    for q in questions:
+        if not isinstance(q, dict):
+            continue
+        compact_questions.append(
+            {
+                "id": q.get("id"),
+                "difficulty": q.get("difficulty"),
+                "question_text": q.get("question_text"),
+                "options": q.get("options"),
+                "correct_option": q.get("correct_option"),
+            }
+        )
+
+    return {
+        "quiz_title": quiz_data.get("quiz_title"),
+        "questions": compact_questions,
+    }
+
+
 def llm_based_grading(concepts, quiz_data) -> tuple[dict, dict]:
     """LLM-as-a-judge for Task Fidelity / Pedagogical Quality.
 
@@ -191,7 +225,8 @@ Output a JSON object strictly with the keys:
 - "reasoning" (string explaining the scores)
 """
 
-    human_content = f"CONCEPTS:\n{concepts}\n\nQUIZ:\n{json.dumps(quiz_data)}"
+    compact_quiz = _compact_quiz_for_grading(quiz_data)
+    human_content = f"CONCEPTS:\n{concepts}\n\nQUIZ:\n{json.dumps(compact_quiz)}"
     messages = [SystemMessage(content=eval_prompt), HumanMessage(content=human_content)]
 
     parser = JsonOutputParser()

@@ -39,6 +39,7 @@ import base64
 import hashlib
 import io
 import os
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -309,15 +310,22 @@ def plan_content_strategy(
 
 
 # Cache: (file_hash, page_index, dpi) -> base64 PNG. Keeps repeat generations
-# instant on the same file without rendering twice.
-_RENDER_CACHE: dict[tuple[str, int, int], str] = {}
+# instant on the same file without rendering twice. Bounded so a long-running
+# Streamlit Cloud worker that processes many distinct PDFs doesn't grow the
+# cache unbounded (each entry can be 50-200 KB of PNG bytes for low-DPI low-
+# detail renders, more for high-detail).
+_RENDER_CACHE_MAX_ENTRIES = 256
+_RENDER_CACHE: "OrderedDict[tuple[str, int, int], str]" = OrderedDict()
 
 
 def _render_page_b64_png(path: str, page_index: int, dpi: int, file_hash: str) -> str:
     """Render one PDF page to base64-encoded PNG using PyMuPDF (fitz)."""
     cache_key = (file_hash, page_index, dpi)
-    if cache_key in _RENDER_CACHE:
-        return _RENDER_CACHE[cache_key]
+    cached = _RENDER_CACHE.get(cache_key)
+    if cached is not None:
+        # Refresh recency on hit so least-recently-used entries get evicted first.
+        _RENDER_CACHE.move_to_end(cache_key)
+        return cached
 
     # Imported lazily so a missing PyMuPDF doesn't break text-only paths.
     import fitz  # type: ignore[import]
@@ -335,6 +343,9 @@ def _render_page_b64_png(path: str, page_index: int, dpi: int, file_hash: str) -
 
     b64 = base64.b64encode(png_bytes).decode("ascii")
     _RENDER_CACHE[cache_key] = b64
+    # LRU eviction: drop the oldest entry once we exceed the cap.
+    while len(_RENDER_CACHE) > _RENDER_CACHE_MAX_ENTRIES:
+        _RENDER_CACHE.popitem(last=False)
     return b64
 
 
