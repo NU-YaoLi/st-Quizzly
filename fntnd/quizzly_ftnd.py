@@ -36,6 +36,7 @@ from bknd.quizzly_material_sizing import (
 from bknd.quizzly_question_gnrt import (
     create_extraction_chain,
     create_generation_chain,
+    get_page_count,
     setup_api,
 )
 from bknd.quizzly_question_upldprcs import (
@@ -694,6 +695,22 @@ def main():
                     if mime_type is None:
                         mime_type = "application/octet-stream"
 
+                    # Pre-flight diagnostics — recorded BEFORE the OpenAI call so we can
+                    # tell file-size / page-cap issues from server-side rejections.
+                    try:
+                        size_bytes = os.path.getsize(fp)
+                    except Exception:
+                        size_bytes = -1
+                    try:
+                        page_count = get_page_count(fp)
+                    except Exception:
+                        page_count = -1
+                    size_mb = size_bytes / (1024 * 1024) if size_bytes >= 0 else -1
+                    log_line(
+                        f"Pre-flight: {os.path.basename(fp)} — "
+                        f"{size_mb:.2f} MB, {page_count} page(s), mime={mime_type}"
+                    )
+
                     with open(fp, "rb") as f:
                         try:
                             oai_file = client.files.create(
@@ -962,11 +979,33 @@ def main():
                     pass
 
             except BadRequestError as e:
-                msg = str(e).lower()
+                raw_msg = str(e)
+                msg = raw_msg.lower()
                 if "context length" in msg or "maximum context" in msg or "too many tokens" in msg:
                     headline = (
                         "**Bad request error — document too large for the model's context window.** "
                         "Try a shorter PDF, fewer pages, or split the upload into smaller files."
+                    )
+                elif "page" in msg and ("limit" in msg or "exceed" in msg or "maximum" in msg):
+                    headline = (
+                        "**Bad request error — PDF page limit exceeded.** "
+                        "OpenAI's file input has a per-document page cap. "
+                        "Split the PDF or use fewer pages."
+                    )
+                elif "encrypted" in msg or "password" in msg:
+                    headline = (
+                        "**Bad request error — PDF is encrypted or password-protected.** "
+                        "Remove the password and re-upload."
+                    )
+                elif "unsupported" in msg or "invalid file" in msg or "mime" in msg or "file type" in msg:
+                    headline = (
+                        "**Bad request error — unsupported or invalid file type.** "
+                        "Re-export the document as a standard PDF and try again."
+                    )
+                elif "string above" in msg or "too long" in msg or "too large" in msg:
+                    headline = (
+                        "**Bad request error — input too large.** "
+                        "Reduce the number of files, pages, or website slots and retry."
                     )
                 else:
                     headline = (
@@ -974,8 +1013,9 @@ def main():
                         "(invalid file, unsupported content, or malformed parameters)."
                     )
                 st.error(headline)
-                if debug_enabled:
-                    st.info(f"**Details:** {str(e)}")
+                # BadRequestError details are user-actionable; always show the underlying
+                # OpenAI message so users don't need DEBUG=1 to understand the cause.
+                st.info(f"**OpenAI says:** {raw_msg}")
                 try:
                     live_status.update(label="Workflow failed — bad request.", state="error", expanded=False)
                 except Exception:
